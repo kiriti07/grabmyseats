@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0f0e11;
+  --surface: #1b181d;
+  --surface-raised: #221e24;
+  --foreground: #f3efe6;
+  --muted: #9c968e;
+  --gold: #e8b84b;
+  --gold-dim: #c89a3a;
+  --success: #4f9d6e;
+  --error: #e2574a;
+  --info: #5b9bd9;
+  --border: rgba(232, 184, 75, 0.18);
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Semicircle notches cut into the left/right edges of a ticket-stub
+     card, centered on the element's bottom edge (its perforation line)
+     and matched to the page background so they read as punched holes. */
+  .ticket-notch::before,
+  .ticket-notch::after {
+    content: "";
+    position: absolute;
+    bottom: -12px;
+    width: 24px;
+    height: 24px;
+    background: var(--background);
+    border-radius: 9999px;
+  }
+  .ticket-notch::before {
+    left: -12px;
+  }
+  .ticket-notch::after {
+    right: -12px;
+  }
+}
