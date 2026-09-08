@@ -10,6 +10,7 @@ import type {
   TransactionDetail,
   TransactionEmailForward,
 } from "@grabmyseats/shared";
+import { Prisma } from "../generated/prisma/client";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 import { requireEscrowMode } from "../middleware/paymentMode";
@@ -70,6 +71,11 @@ function partyForUser(
   return null;
 }
 
+// Matches the `include` shape of the findMany below - named so the two
+// .map() callbacks in this handler don't each need to spell out the full
+// Prisma.TransactionGetPayload<...> expression.
+type TransactionWithListing = Prisma.TransactionGetPayload<{ include: { listing: true } }>;
+
 // Mounted before GET "/:id" so "mine" isn't swallowed by the :id param -
 // same reasoning as GET /api/listings/mine. The buyer's own past
 // reservations/purchases, newest first - powers /account/purchases (see
@@ -86,16 +92,18 @@ transactionsRouter.get("/mine", requireAuth, async (req, res) => {
   const ratedTransactionIds = new Set(
     (
       await prisma.rating.findMany({
-        where: { transactionId: { in: transactions.map((txn) => txn.id) } },
+        where: {
+          transactionId: { in: transactions.map((txn: TransactionWithListing) => txn.id) },
+        },
         select: { transactionId: true },
       })
-    ).map((r) => r.transactionId),
+    ).map((r: Prisma.RatingGetPayload<{ select: { transactionId: true } }>) => r.transactionId),
   );
 
   const body: ApiResponse<{ purchases: MyPurchase[] }> = {
     success: true,
     data: {
-      purchases: transactions.map((txn) => ({
+      purchases: transactions.map((txn: TransactionWithListing) => ({
         id: txn.id,
         status: txn.status,
         seatsCount: txn.seatsCount,
@@ -171,7 +179,7 @@ transactionsRouter.post("/:id/pay", requireEscrowMode, requireAuth, async (req, 
   const transactionId = req.params.id as string;
 
   try {
-    const { transaction } = await prisma.$transaction(async (tx) => {
+    const { transaction } = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const transaction = await tx.transaction.findUnique({
         where: { id: transactionId },
         include: { listing: { include: { seller: true } } },

@@ -10,6 +10,7 @@
     "dev:frontend": "npm run dev -w frontend",
     "dev:backend": "npm run dev -w backend",
     "build:shared": "npm run build -w shared",
-    "build": "npm run build:shared && npm run build -w backend && npm run build -w frontend"
+    "build": "npm run build:shared && npm run build -w backend && npm run build -w frontend",
+    "postinstall": "npm run build:shared"
   }
 }
