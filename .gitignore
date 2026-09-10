@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+
+# env files - .env.example and .env.production are intentionally NOT
+# ignored (see the comments in each): they hold no secrets and are meant
+# to be committed as, respectively, a template and the real production
+# defaults Next.js loads at build time.
+.env
+.env.local
+.env.*.local
+
+# build output
+dist/
+build/
+.next/
+out/
+shared/dist/
+backend/src/generated/
+*.tsbuildinfo
+
+# testing
+coverage/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+*.pem
+
+# editor
+.vscode/
+.idea/
+
+# vercel
+.vercel

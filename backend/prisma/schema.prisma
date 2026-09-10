@@ -7,6 +7,15 @@ generator client {
   previewFeatures = ["postgresqlExtensions"]
 }
 
+// No `url`/`directUrl` here - Prisma 7 removed both from schema.prisma
+// entirely (a schema declaring either now fails `prisma validate`/
+// `generate` with P1012, pointing at prisma.config.ts instead). See
+// prisma7.config.ts's `datasource.url` for the Prisma CLI's own
+// connection (migrate/introspect/studio - the direct, non-pooled one
+// against Supabase), and lib/prisma.ts for the running app's own
+// PrismaClient, which is unrelated to either of those and reads
+// DATABASE_URL (the pooled one) directly via the PrismaPg driver
+// adapter, same as it always has.
 datasource db {
   provider   = "postgresql"
   extensions = [postgis, postgis_topology, postgis_tiger_geocoder, fuzzystrmatch, pg_trgm]

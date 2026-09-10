@@ -8,7 +8,17 @@ export default defineConfig({
   migrations: {
     path: "prisma/migrations",
   },
+  // This is the Prisma CLI's own connection (migrate/db pull/studio) -
+  // deliberately DIRECT_URL, not DATABASE_URL. Prisma 7 dropped
+  // datasource.directUrl (and schema.prisma's url/directUrl fields
+  // entirely - see the comment there); this is the current replacement
+  // for the same "pooled for the app, direct for the CLI" split Supabase
+  // needs, since PgBouncer's transaction-pooling mode doesn't support the
+  // prepared statements/advisory locks `prisma migrate` requires. The
+  // running app's own PrismaClient (lib/prisma.ts) is unaffected by this
+  // file - it reads DATABASE_URL (the pooled connection) directly via its
+  // own driver adapter.
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: process.env["DIRECT_URL"],
   },
 });
