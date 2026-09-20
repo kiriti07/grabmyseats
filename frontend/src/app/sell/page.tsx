@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
@@ -19,6 +19,7 @@ import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/datetime
 import { DELIVERY_METHOD_DESCRIPTION, DELIVERY_METHOD_LABEL } from "@/lib/deliveryMethod";
 import { CATEGORY_LABEL, titleFieldLabel, venueFieldLabel } from "@/lib/category";
 import { ApiError, createListing, fetchDeliveryEligibility, geocodeVenue, runOcr } from "@/lib/api";
+import { getVenuePickerCityCenter } from "@/lib/venuePickerCityCenters";
 
 const ALL_CATEGORIES: Category[] = ["MOVIE", "EVENT", "SPORT"];
 
@@ -59,6 +60,13 @@ export default function SellPage() {
   const [autoFilled, setAutoFilled] = useState<Partial<Record<AutoFillableField, boolean>>>({});
   const [isScanning, setIsScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const [skipOcr, setSkipOcr] = useState(false);
+  // A ref (not just the `skipOcr` state) because handleFileChange's OCR
+  // request can still be in flight when the seller clicks "skip" - the
+  // in-progress `await runOcr(...)` closes over state from render time, so
+  // only a ref mutated synchronously in the click handler is guaranteed to
+  // be seen when that request resolves.
+  const skipOcrRef = useRef(false);
 
   // Resolved venue location, confirmed either automatically (geocoding
   // succeeded) or by the seller via VenuePicker below. Submission is
@@ -135,6 +143,13 @@ export default function SellPage() {
     };
   }
 
+  function handleSkipOcr() {
+    skipOcrRef.current = true;
+    setSkipOcr(true);
+    setIsScanning(false);
+    setScanNotice(null);
+  }
+
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     setQrData(null);
@@ -151,11 +166,12 @@ export default function SellPage() {
     }
     setError(null);
     setScreenshot(file);
-    if (!file) return;
+    if (!file || skipOcrRef.current) return;
 
     setIsScanning(true);
     try {
       const { fields, qrData } = await runOcr(file, category);
+      if (skipOcrRef.current) return;
       setQrData(qrData);
 
       // Only ever fill a currently-empty field - never overwrite something
@@ -192,9 +208,11 @@ export default function SellPage() {
         setScanNotice("Couldn't confidently read any details from this screenshot - fill them in below.");
       }
     } catch {
-      setScanNotice("Couldn't auto-read this screenshot - fill in the details manually.");
+      if (!skipOcrRef.current) {
+        setScanNotice("Couldn't auto-read this screenshot - fill in the details manually.");
+      }
     } finally {
-      setIsScanning(false);
+      if (!skipOcrRef.current) setIsScanning(false);
     }
   }
 
@@ -351,9 +369,20 @@ export default function SellPage() {
         </fieldset>
 
         <div>
-          <label htmlFor="screenshot" className="mb-1.5 block text-sm font-medium text-foreground">
-            Booking confirmation screenshot
-          </label>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <label htmlFor="screenshot" className="block text-sm font-medium text-foreground">
+              Booking confirmation screenshot
+            </label>
+            {!skipOcr && (
+              <button
+                type="button"
+                onClick={handleSkipOcr}
+                className="shrink-0 text-xs font-semibold text-gold underline underline-offset-2 hover:text-gold-dim"
+              >
+                Skip auto-fill, enter manually
+              </button>
+            )}
+          </div>
           <input
             id="screenshot"
             type="file"
@@ -364,10 +393,12 @@ export default function SellPage() {
           <p className="mt-1.5 text-xs text-muted">
             {isScanning
               ? "Scanning screenshot for details..."
-              : scanNotice ??
-                (category === "MOVIE"
-                  ? "We'll try to auto-fill the fields below from your screenshot."
-                  : "We'll scan for a QR code, but you'll need to fill in the details below yourself.")}
+              : skipOcr
+                ? "Auto-fill skipped - fill in the details below yourself."
+                : scanNotice ??
+                  (category === "MOVIE"
+                    ? "We'll try to auto-fill the fields below from your screenshot."
+                    : "We'll scan for a QR code, but you'll need to fill in the details below yourself.")}
           </p>
         </div>
 
@@ -433,9 +464,7 @@ export default function SellPage() {
           <VenuePicker
             initialQuery={venueCleanedName || theaterName}
             city={city}
-            cityCenter={
-              INDIAN_METRO_CITIES.find((c) => c.name === city) ?? INDIAN_METRO_CITIES[0]
-            }
+            cityCenter={getVenuePickerCityCenter(city)}
             onConfirm={(coords, label) => {
               setVenueCoords(coords);
               setVenueLabel(label);

@@ -26,7 +26,7 @@ loadEnv({ path: '.env.local' });
 // The real, live production domain - a plain `npx cap sync` with no
 // CAPACITOR_SERVER_URL override (i.e. in a clean checkout/CI, where
 // .env.local doesn't exist) resolves to this.
-const PRODUCTION_FRONTEND_URL = 'https://grabmyseats.com';
+const PRODUCTION_FRONTEND_URL = 'https://grabmyseats-frontend.vercel.app';
 const serverUrl = process.env.CAPACITOR_SERVER_URL || PRODUCTION_FRONTEND_URL;
 
 if (!process.env.CAPACITOR_SERVER_URL) {
