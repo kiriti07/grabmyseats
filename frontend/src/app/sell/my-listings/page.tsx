@@ -224,6 +224,11 @@ export default function MyListingsPage() {
                     </span>
                   </div>
 
+                  <p className="mt-1 text-xs text-muted">
+                    {listing.viewCount} view{listing.viewCount === 1 ? "" : "s"} ·{" "}
+                    {listing.contactCount} contacted
+                  </p>
+
                   {txnStates.length > 0 && (
                     <div className="mt-3 flex flex-col gap-1.5 border-t border-line pt-2">
                       {txnStates.map(({ txn, text }) => (

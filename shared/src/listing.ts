@@ -144,4 +144,12 @@ export interface MyListing {
   availableDeliveryMethods: DeliveryMethod[];
   createdAt: string;
   transactions: MyListingTransactionSummary[];
+  // Seller-only insight - deliberately not on ListingSearchResult or
+  // ListingDetail above, since a seller's view/contact counts shouldn't be
+  // visible to buyers or competitors. viewCount increments on every GET
+  // /api/listings/:id load (including anonymous ones); contactCount
+  // increments once per contact_only-mode POST /:id/reserve, at the exact
+  // point seller contact info is handed to a buyer.
+  viewCount: number;
+  contactCount: number;
 }

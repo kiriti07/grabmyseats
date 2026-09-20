@@ -567,6 +567,17 @@ listingsRouter.get("/:id", async (req, res) => {
     return;
   }
 
+  // Seller-only insight surfaced on GET /api/listings/mine (see
+  // toMyListing) - counts every load of this detail page, including
+  // anonymous/unauthenticated ones, which is deliberate: anonymous
+  // browsing is exactly the traffic a seller wants visibility into.
+  // `{ increment: 1 }` compiles to a single atomic UPDATE, so concurrent
+  // requests for the same listing can't clobber each other's count.
+  await prisma.listing.update({
+    where: { id: listingId },
+    data: { viewCount: { increment: 1 } },
+  });
+
   const distanceKm =
     lat !== null && lng !== null
       ? haversineDistanceMeters(lat, lng, listing.theaterLat, listing.theaterLng) / 1000
@@ -779,6 +790,15 @@ listingsRouter.post("/:id/reserve", requireAuth, async (req, res) => {
         hasWhatsapp: seller.hasWhatsapp,
         ratingSummary: await getRatingSummary(sellerId),
       };
+      // Seller-only insight (see toMyListing) - incremented right here,
+      // not on every /:id/reserve call, since this is the one point that
+      // actually hands contact info to a buyer (the escrow-mode branch
+      // above never sets `contact` at all). `{ increment: 1 }` is a single
+      // atomic UPDATE, safe under concurrent requests for the same listing.
+      await prisma.listing.update({
+        where: { id: listingId },
+        data: { contactCount: { increment: 1 } },
+      });
     }
 
     const body: ApiResponse<ReserveResult> = {

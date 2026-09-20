@@ -178,6 +178,17 @@ model Listing {
   qrData          String? // if per-seat QR available
   screenshotUrl   String? // uploaded booking confirmation screenshot
   status          ListingStatus                          @default(ACTIVE)
+  // Seller-only insight, not shown anywhere public (search results or the
+  // public GET /:id detail response) - only GET /api/listings/mine exposes
+  // these (see serialize.ts's toMyListing). Incremented atomically
+  // (`{ increment: 1 }`), never read-modify-written, so concurrent
+  // requests can't lose a count.
+  viewCount       Int                                    @default(0)
+  // Incremented once per successful contact_only-mode POST /:id/reserve
+  // (the exact point seller contact info is handed to a buyer) - see that
+  // route. Always 0 in escrow mode, since that flow never reveals contact
+  // info at reserve time.
+  contactCount    Int                                    @default(0)
   createdAt       DateTime                               @default(now())
   transactions    Transaction[]
   alertNotifications AlertNotification[]

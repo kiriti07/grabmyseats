@@ -115,6 +115,8 @@ export function toMyListing(
     status: listing.status,
     availableDeliveryMethods: listing.availableDeliveryMethods,
     createdAt: listing.createdAt.toISOString(),
+    viewCount: listing.viewCount,
+    contactCount: listing.contactCount,
     transactions: listing.transactions.map((txn) => ({
       id: txn.id,
       seatsCount: txn.seatsCount,
