@@ -6,7 +6,6 @@ import Link from "next/link";
 import type { ReferralSummary } from "@grabmyseats/shared";
 import { useAuth } from "@/context/AuthContext";
 import { fetchMyReferrals } from "@/lib/api";
-import { isProfileIncomplete } from "@/lib/authFlow";
 
 // A protected route example: src/middleware.ts redirects here-bound
 // requests to /login when there's no session cookie at all. This
@@ -25,18 +24,10 @@ export default function AccountPage() {
   const [origin, setOrigin] = useState("");
 
   useEffect(() => {
-    if (isLoading) return;
-    if (!isAuthenticated) {
+    if (!isLoading && !isAuthenticated) {
       router.replace("/login");
-      return;
     }
-    // Same "can't skip it" guard as useRequireAuth.ts (for /buy and
-    // /sell) - a signup that never finished naming itself gets bounced
-    // back here instead of into the account page.
-    if (isProfileIncomplete(user)) {
-      router.replace("/login/welcome?next=%2Faccount");
-    }
-  }, [isLoading, isAuthenticated, user, router]);
+  }, [isLoading, isAuthenticated, router]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -103,14 +94,6 @@ export default function AccountPage() {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background text-muted">
         Session expired. Redirecting to sign in...
-      </main>
-    );
-  }
-
-  if (isProfileIncomplete(user)) {
-    return (
-      <main className="flex min-h-dvh items-center justify-center bg-background text-muted">
-        Redirecting...
       </main>
     );
   }
@@ -183,8 +166,8 @@ export default function AccountPage() {
           <div className="w-full max-w-xs rounded-lg border border-line bg-surface p-4 text-left">
             <p className="text-sm font-medium text-foreground">Refer &amp; Earn</p>
             <p className="mt-1 text-xs text-muted">
-              Share your link so friends can sign up - once someone you refer lists or books a
-              ticket, it counts toward your next reward.
+              Share your link - once someone you refer lists or books a ticket, it counts toward
+              your next reward.
             </p>
 
             <div className="mt-3 flex items-center gap-2">

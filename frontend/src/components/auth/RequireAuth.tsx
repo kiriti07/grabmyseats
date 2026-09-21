@@ -3,9 +3,9 @@
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 export function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isReady } = useRequireAuth();
+  const { isAuthenticated, isLoading } = useRequireAuth();
 
-  if (!isReady) {
+  if (isLoading || !isAuthenticated) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background text-muted">
         Loading...

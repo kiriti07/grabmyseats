@@ -39,17 +39,6 @@ export interface UpdateProfileInput {
   hasWhatsapp: boolean;
 }
 
-// POST /api/auth/complete-profile request body - the one-time "who are
-// you" step shown right after a brand-new signup (see isNewAccount on the
-// POST /api/auth/otp/verify response). Sets User.name/email directly -
-// deliberately not UpdateProfileInput's fullName/dateOfBirth/etc, which
-// are a separate, later-in-the-relationship set of fields edited via
-// PATCH /api/users/me/profile.
-export interface CompleteProfileInput {
-  name: string;
-  email?: string;
-}
-
 // GET /api/users/me/delivery-eligibility response: whether this user
 // currently qualifies to offer EMAIL_FORWARD as a seller. New sellers
 // default to IN_PERSON-only until they've built a track record - see the

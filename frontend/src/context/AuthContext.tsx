@@ -17,11 +17,6 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (token: string, user: User) => void;
-  // Refreshes the in-memory user without touching the session token -
-  // used by /login/welcome once POST /api/auth/complete-profile returns
-  // the now-named user, so the rest of the app immediately sees it
-  // without a full re-fetch.
-  updateUser: (user: User) => void;
   logout: () => void;
 }
 
@@ -52,10 +47,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(user);
   }, []);
 
-  const updateUser = useCallback((user: User) => {
-    setUser(user);
-  }, []);
-
   const logout = useCallback(() => {
     clearToken();
     setUser(null);
@@ -64,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, isAuthenticated: user !== null, isLoading, login, updateUser, logout }}
+      value={{ user, isAuthenticated: user !== null, isLoading, login, logout }}
     >
       {children}
     </AuthContext.Provider>
