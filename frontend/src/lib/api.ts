@@ -1,6 +1,7 @@
 import type {
   ApiResponse,
   Category,
+  CompleteProfileInput,
   CreateRatingInput,
   CreateTicketAlertInput,
   DeliveryMethod,
@@ -93,7 +94,7 @@ export function verifyOtpCode(
   phone: string,
   code: string,
   ref?: string,
-): Promise<{ user: User; token: string }> {
+): Promise<{ user: User; token: string; isNewAccount: boolean }> {
   return request("/api/auth/otp/verify", {
     method: "POST",
     body: JSON.stringify({ phone, code, ...(ref ? { ref } : {}) }),
@@ -103,6 +104,16 @@ export function verifyOtpCode(
 export function fetchMe(token: string): Promise<{ user: User }> {
   return request("/api/auth/me", {
     headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+// The one-time "complete your profile" step shown right after signup
+// (isNewAccount: true from verifyOtpCode above) - see
+// frontend/src/app/login/welcome/page.tsx.
+export function completeProfile(input: CompleteProfileInput): Promise<{ user: User }> {
+  return request("/api/auth/complete-profile", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 

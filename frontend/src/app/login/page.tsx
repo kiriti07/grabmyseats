@@ -53,8 +53,12 @@ function LoginForm() {
 
   return (
     <AuthShell
-      title="Sign in"
-      subtitle="Enter your phone number and we'll text you a code"
+      title={ref ? "You're invited!" : "Sign in"}
+      subtitle={
+        ref
+          ? "Sign up in two quick steps - enter your phone number to get started"
+          : "Enter your phone number and we'll text you a code"
+      }
     >
       <form onSubmit={handleSubmit} noValidate>
         <label htmlFor="phone" className="mb-2 block text-sm font-medium text-foreground">

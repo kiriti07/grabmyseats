@@ -9,17 +9,9 @@ import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError, requestOtp, verifyOtpCode } from "@/lib/api";
+import { safeNextPath } from "@/lib/authFlow";
 
 const RESEND_COOLDOWN_SECONDS = 60;
-
-// Only ever a same-origin path forwarded from useRequireAuth.ts/
-// middleware.ts's own `next` params - never trust it as a full URL
-// (an absolute or protocol-relative value here would be an open redirect
-// straight after login).
-function safeNextPath(next: string | null): string {
-  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
-  return "/";
-}
 
 function VerifyForm() {
   const searchParams = useSearchParams();
@@ -62,9 +54,17 @@ function VerifyForm() {
 
     setIsVerifying(true);
     try {
-      const { user, token } = await verifyOtpCode(phone, code, ref ?? undefined);
+      const { user, token, isNewAccount } = await verifyOtpCode(phone, code, ref ?? undefined);
       login(token, user);
-      router.replace(next);
+      if (isNewAccount) {
+        // Referral linking (if any) already happened inside the verify
+        // call above - this step never needs the ref code itself, just
+        // has to carry `next` one step further so the eventual redirect
+        // still lands where the visitor was originally headed.
+        router.replace(`/login/welcome?next=${encodeURIComponent(next)}`);
+      } else {
+        router.replace(next);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
       setIsVerifying(false);

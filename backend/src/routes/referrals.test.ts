@@ -69,7 +69,11 @@ describe("referrals", () => {
       .send({ phone, code, ...(ref ? { ref } : {}) });
     expect(res.status).toBe(200);
     userIds.push(res.body.data.user.id);
-    return { id: res.body.data.user.id as string, token: res.body.data.token as string };
+    return {
+      id: res.body.data.user.id as string,
+      token: res.body.data.token as string,
+      isNewAccount: res.body.data.isNewAccount as boolean,
+    };
   }
 
   async function createListing(token: string, overrides: { theaterLat?: number; theaterLng?: number } = {}) {
@@ -270,5 +274,38 @@ describe("referrals", () => {
     const afterLogin = await prisma.user.findUniqueOrThrow({ where: { id: existing.id } });
     expect(afterLogin.referredByUserId).toBeNull();
     expect((await getReferrals(referrer.token)).referredCount).toBe(0);
+  });
+
+  it("referral attribution survives the full signup -> complete-profile -> qualifying-listing chain", async () => {
+    const referrer = await createUser("chain-referrer", "REFCHAIN1");
+
+    // Step 1: signup via the real OTP flow, exactly as /login -> /login/verify
+    // does - referredByUserId is set here, inside this same call.
+    const phone = randomDigitPhone();
+    const referred = await verifyOtp(phone, "REFCHAIN1");
+    expect(referred.isNewAccount).toBe(true);
+
+    const linked = await prisma.user.findUniqueOrThrow({ where: { id: referred.id } });
+    expect(linked.referredByUserId).toBe(referrer.id);
+    expect(linked.name).toBeNull();
+
+    // Step 2: the onboarding step this flag gates (/login/welcome on the
+    // frontend) - completing it must not touch referredByUserId at all.
+    const completeRes = await request(app)
+      .post("/api/auth/complete-profile")
+      .set("Authorization", `Bearer ${referred.token}`)
+      .send({ name: "Chain Test User" });
+    expect(completeRes.status).toBe(200);
+
+    const afterComplete = await prisma.user.findUniqueOrThrow({ where: { id: referred.id } });
+    expect(afterComplete.referredByUserId).toBe(referrer.id);
+    expect(afterComplete.name).toBe("Chain Test User");
+
+    // Not counted yet - profile completion isn't a qualifying action.
+    expect((await getReferrals(referrer.token)).referredCount).toBe(0);
+
+    // Step 3: the actual qualifying action.
+    await createListing(referred.token);
+    expect((await getReferrals(referrer.token)).referredCount).toBe(1);
   });
 });

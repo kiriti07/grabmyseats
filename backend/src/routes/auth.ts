@@ -9,6 +9,7 @@ import { toSharedUser } from "../lib/serialize";
 import { requireAuth } from "../middleware/auth";
 import { otpPhoneLimiter, otpIpLimiter } from "../middleware/rateLimit";
 import { generateUniqueReferralCode } from "../lib/referral";
+import { isValidEmail } from "../lib/validators";
 
 export const authRouter = Router();
 
@@ -80,6 +81,7 @@ authRouter.post("/otp/verify", async (req, res) => {
   // apply to a brand-new account, never backfill onto an existing one
   // logging back in - so this does the existence check itself instead.
   const existingUser = await prisma.user.findUnique({ where: { phone } });
+  const isNewAccount = !existingUser;
 
   let user;
   if (existingUser) {
@@ -138,11 +140,73 @@ authRouter.post("/otp/verify", async (req, res) => {
     path: "/",
   });
 
-  const body: ApiResponse<{ user: SharedUser; token: string }> = {
+  // Lets the frontend show the one-time "complete your profile" step
+  // (POST /complete-profile below) right after a brand-new signup, and
+  // skip straight through for a returning user's login - see
+  // frontend/src/app/login/verify/page.tsx.
+  const body: ApiResponse<{ user: SharedUser; token: string; isNewAccount: boolean }> = {
     success: true,
-    data: { user: toSharedUser(loggedInUser), token },
+    data: { user: toSharedUser(loggedInUser), token, isNewAccount },
   };
   res.json(body);
+});
+
+// One-time onboarding step immediately after a brand-new signup (see
+// isNewAccount above) - collects the display name (used everywhere a
+// counterparty sees this user: TransactionContact, session tokens,
+// toSharedUser) that OTP-only signup never asks for otherwise, plus an
+// optional email. Deliberately not folded into PATCH /api/users/me/profile
+// (which edits fullName/dateOfBirth/etc, a separate, later-in-the-
+// relationship set of fields): gated on name being unset, so it can only
+// ever run once, right after signup - a returning user who already has a
+// name on file (every existing account does, or will as soon as they
+// complete this) can't call it again to reuse it as a lightweight profile
+// editor.
+authRouter.post("/complete-profile", requireAuth, async (req, res) => {
+  if (req.user!.name) {
+    const body: ApiResponse<never> = {
+      success: false,
+      error: "Profile already completed",
+    };
+    res.status(409).json(body);
+    return;
+  }
+
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
+
+  const errors: string[] = [];
+  if (!name) errors.push("name is required");
+  if (email && !isValidEmail(email)) errors.push("email must be a valid email address");
+  if (errors.length > 0) {
+    const body: ApiResponse<never> = { success: false, error: errors.join("; ") };
+    res.status(400).json(body);
+    return;
+  }
+
+  try {
+    const updated = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { name, ...(email ? { email } : {}) },
+    });
+    const body: ApiResponse<{ user: SharedUser }> = {
+      success: true,
+      data: { user: toSharedUser(updated) },
+    };
+    res.json(body);
+  } catch (err) {
+    // Unique constraint violation on email (Prisma error code P2002) - same
+    // handling as PATCH /api/users/me/profile.
+    if (err && typeof err === "object" && "code" in err && err.code === "P2002") {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: "That email is already in use by another account",
+      };
+      res.status(409).json(body);
+      return;
+    }
+    throw err;
+  }
 });
 
 authRouter.get("/me", requireAuth, (req, res) => {
