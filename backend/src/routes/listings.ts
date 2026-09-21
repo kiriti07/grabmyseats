@@ -29,6 +29,7 @@ import { parseListingText } from "../lib/parseListingText";
 import { getSellerDeliveryEligibility } from "../lib/sellerTrust";
 import { consumeListingSeats } from "../lib/listingSeats";
 import { getRatingSummary } from "../lib/ratingSummary";
+import { checkAndAwardReferralMilestone } from "../lib/referral";
 import {
   toListingDetail,
   toMyListing,
@@ -277,6 +278,13 @@ listingsRouter.post("/", requireAuth, uploadScreenshot, async (req, res) => {
     };
     res.status(400).json(body);
     return;
+  }
+
+  // Creating a listing is one of the two "qualifying actions" a referred
+  // user can take (the other is reserving one - see POST /:id/reserve
+  // below) - see lib/referral.ts for why signup alone doesn't count.
+  if (req.user!.referredByUserId) {
+    await checkAndAwardReferralMilestone(req.user!.referredByUserId);
   }
 
   const body: ApiResponse<{ listing: SharedListing }> = {
@@ -799,6 +807,14 @@ listingsRouter.post("/:id/reserve", requireAuth, async (req, res) => {
 
       return { transaction, sellerId };
     });
+
+    // The other "qualifying action" for a referred user (see POST
+    // /api/listings above) - a reservation counts here regardless of
+    // PAYMENT_MODE, since contact_only mode still creates a real
+    // Transaction row above, just without escrow.
+    if (req.user!.referredByUserId) {
+      await checkAndAwardReferralMilestone(req.user!.referredByUserId);
+    }
 
     // contact_only mode hands the seller's contact info straight back here
     // instead of gating it behind escrow + a showtime window (see GET

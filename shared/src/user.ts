@@ -51,3 +51,23 @@ export interface SellerDeliveryEligibility {
   requiredCompletedSales: number;
   hasUnresolvedReviewFlags: boolean;
 }
+
+// GET /api/users/me/referrals response - see backend/src/lib/referral.ts.
+// referralCode is the only piece needed to build the shareable link
+// (<origin>/signup?ref=<code>); the frontend builds that full URL itself
+// (same pattern as the existing Share feature's window.location.origin
+// use in account/page.tsx) rather than the backend guessing its own public
+// domain. referredCount only counts a referred user once they've
+// completed a real listing or reservation - see REFERRAL_MILESTONE in
+// backend/src/lib/referral.ts for why signup alone doesn't count.
+export interface ReferralSummary {
+  referralCode: string;
+  referredCount: number;
+  pointsBalance: number;
+  // Both derived from the same 20-referral interval
+  // (backend/src/lib/referral.ts's REFERRAL_MILESTONE_INTERVAL) - e.g. at
+  // referredCount 23, nextMilestoneAt is 40 and referralsUntilNextMilestone
+  // is 17.
+  nextMilestoneAt: number;
+  referralsUntilNextMilestone: number;
+}

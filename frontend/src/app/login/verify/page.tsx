@@ -27,6 +27,9 @@ function VerifyForm() {
   const { login } = useAuth();
   const phone = searchParams.get("phone") ?? "";
   const next = safeNextPath(searchParams.get("next"));
+  // Forwarded from /login - see that page's own comment. Only reaches the
+  // backend as part of THIS verify call, never a later login.
+  const ref = searchParams.get("ref");
 
   const [code, setCode] = useState("");
   const [otpKey, setOtpKey] = useState(0);
@@ -59,7 +62,7 @@ function VerifyForm() {
 
     setIsVerifying(true);
     try {
-      const { user, token } = await verifyOtpCode(phone, code);
+      const { user, token } = await verifyOtpCode(phone, code, ref ?? undefined);
       login(token, user);
       router.replace(next);
     } catch (err) {
@@ -90,7 +93,13 @@ function VerifyForm() {
       <div className="mb-4 flex items-center justify-center gap-2 text-sm text-muted">
         <span>{phone}</span>
         <Link
-          href={next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`}
+          href={(() => {
+            const params = new URLSearchParams();
+            if (next !== "/") params.set("next", next);
+            if (ref) params.set("ref", ref);
+            const query = params.toString();
+            return query ? `/login?${query}` : "/login";
+          })()}
           className="font-medium text-gold hover:text-gold-dim"
         >
           edit

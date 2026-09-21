@@ -8,6 +8,7 @@ import { SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS } from "../lib/authConfig"
 import { toSharedUser } from "../lib/serialize";
 import { requireAuth } from "../middleware/auth";
 import { otpPhoneLimiter, otpIpLimiter } from "../middleware/rateLimit";
+import { generateUniqueReferralCode } from "../lib/referral";
 
 export const authRouter = Router();
 
@@ -73,12 +74,33 @@ authRouter.post("/otp/verify", async (req, res) => {
   }
 
   // First verified OTP for a phone number signs the user up; subsequent
-  // ones log them back in.
-  const user = await prisma.user.upsert({
-    where: { phone },
-    create: { phone },
-    update: {},
-  });
+  // ones log them back in. A plain upsert can't tell those apart (its
+  // create/update branches both just return a row), and that distinction
+  // is exactly what referral linking needs below - ?ref= must only ever
+  // apply to a brand-new account, never backfill onto an existing one
+  // logging back in - so this does the existence check itself instead.
+  const existingUser = await prisma.user.findUnique({ where: { phone } });
+
+  let user;
+  if (existingUser) {
+    user = existingUser;
+  } else {
+    // Resolves silently (no error) if the code is missing, malformed, or
+    // just doesn't match anyone - a bad/stale referral link should never
+    // block signup, it should just fail to credit anyone.
+    const refCode = typeof req.body?.ref === "string" ? req.body.ref.trim() : "";
+    const referrer = refCode
+      ? await prisma.user.findUnique({ where: { referralCode: refCode }, select: { id: true } })
+      : null;
+
+    user = await prisma.user.create({
+      data: {
+        phone,
+        referralCode: await generateUniqueReferralCode(),
+        referredByUserId: referrer?.id ?? null,
+      },
+    });
+  }
 
   // A brand-new upsert can never be suspended, so this only ever fires for
   // an existing suspended user trying to log back in - same clear-message

@@ -79,6 +79,52 @@ model User {
 
   ratingsGiven    Rating[] @relation("rater")
   ratingsReceived Rating[] @relation("ratedUser")
+
+  // Short, shareable code auto-generated for every user (see
+  // lib/referral.ts's generateUniqueReferralCode, which POST
+  // /api/auth/otp/verify's signup branch always calls explicitly) - never
+  // user-chosen, so it doubles as an opaque referral-link identifier
+  // without leaking anything about the account. Assigned once at creation
+  // and never reassigned. The dbgenerated default exists only as a
+  // fallback for a raw prisma.user.create() that doesn't set it (test
+  // fixtures, scripts) - real signups always get a properly-checked-unique
+  // code from generateUniqueReferralCode instead of relying on this.
+  referralCode String @unique @default(dbgenerated("upper(substr(md5((random())::text || (clock_timestamp())::text), 1, 8))"))
+
+  // Set once, only by POST /api/auth/otp/verify's signup branch (never by
+  // a later login, and never editable afterward) - see that route for the
+  // ?ref=<code>-to-referredByUserId resolution. Self-relation: a referrer
+  // can have many referredUsers, but is referred by at most one user.
+  referredByUserId String?
+  referredBy       User?   @relation("referrals", fields: [referredByUserId], references: [id])
+  referredUsers    User[]  @relation("referrals")
+
+  // The last referral-count threshold (a multiple of 20) already paid out
+  // via a REFERRAL_MILESTONE PointsLedger entry for this user as a
+  // referrer - see lib/referral.ts's checkAndAwardReferralMilestone. This
+  // is what prevents the same milestone being awarded twice; the actual
+  // point balance is never stored here; it's always summed from
+  // PointsLedger.
+  referralMilestoneThreshold Int @default(0)
+
+  pointsLedger PointsLedger[]
+}
+
+enum PointsLedgerReason {
+  REFERRAL_MILESTONE
+}
+
+// Append-only - a user's point balance is always SUM(amount) over their
+// rows here, never a directly-mutated column, so it can never drift out
+// of sync with how it was earned. See lib/referral.ts's
+// checkAndAwardReferralMilestone, the only place that writes to this today.
+model PointsLedger {
+  id        String             @id @default(cuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id])
+  amount    Int
+  reason    PointsLedgerReason
+  createdAt DateTime           @default(now())
 }
 
 enum AdminRole {

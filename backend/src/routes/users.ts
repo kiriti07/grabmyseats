@@ -3,6 +3,7 @@ import { Router } from "express";
 import type {
   ApiResponse,
   RatingSummary,
+  ReferralSummary,
   SellerDeliveryEligibility,
   User as SharedUser,
 } from "@grabmyseats/shared";
@@ -12,6 +13,7 @@ import { requireAuth } from "../middleware/auth";
 import { uploadProfileImage } from "../middleware/upload";
 import { getSellerDeliveryEligibility } from "../lib/sellerTrust";
 import { getRatingSummary } from "../lib/ratingSummary";
+import { getReferralSummary } from "../lib/referral";
 import { toSharedUser } from "../lib/serialize";
 import { isValidEmail } from "../lib/validators";
 
@@ -25,6 +27,17 @@ export const usersRouter = Router();
 usersRouter.get("/me/delivery-eligibility", requireAuth, async (req, res) => {
   const eligibility = await getSellerDeliveryEligibility(req.user!.id);
   const body: ApiResponse<SellerDeliveryEligibility> = { success: true, data: eligibility };
+  res.json(body);
+});
+
+// This user's own referral code, qualified-referral count, points
+// balance, and progress toward the next 20-referral milestone - see
+// lib/referral.ts. Qualified-referral count and points balance are both
+// derived fresh on every call (a distinct-user query and a PointsLedger
+// SUM respectively), never read off a maintained counter.
+usersRouter.get("/me/referrals", requireAuth, async (req, res) => {
+  const summary = await getReferralSummary(req.user!.id);
+  const body: ApiResponse<ReferralSummary> = { success: true, data: summary };
   res.json(body);
 });
 

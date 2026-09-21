@@ -15,6 +15,7 @@ import type {
   Rating,
   RatingSummary,
   RazorpayCheckoutOrder,
+  ReferralSummary,
   ReserveResult,
   SellerDeliveryEligibility,
   Transaction,
@@ -91,10 +92,11 @@ export function requestOtp(phone: string): Promise<{ message: string }> {
 export function verifyOtpCode(
   phone: string,
   code: string,
+  ref?: string,
 ): Promise<{ user: User; token: string }> {
   return request("/api/auth/otp/verify", {
     method: "POST",
-    body: JSON.stringify({ phone, code }),
+    body: JSON.stringify({ phone, code, ...(ref ? { ref } : {}) }),
   });
 }
 
@@ -144,6 +146,10 @@ export function reserveListing(
 
 export function fetchDeliveryEligibility(): Promise<SellerDeliveryEligibility> {
   return request("/api/users/me/delivery-eligibility");
+}
+
+export function fetchMyReferrals(): Promise<ReferralSummary> {
+  return request("/api/users/me/referrals");
 }
 
 export function fetchMyListings(): Promise<{ listings: MyListing[] }> {

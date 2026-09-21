@@ -2,6 +2,7 @@
 
 import { Suspense, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
@@ -14,10 +15,16 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   // Forwarded through to /login/verify, then on to the post-login
   // redirect - see useRequireAuth.ts and middleware.ts, which are what
   // actually set this when a protected route bounces someone here.
-  const next = useSearchParams().get("next");
+  const next = searchParams.get("next");
+  // The referral code from a shared link (e.g. /signup?ref=ABC123 - see
+  // account/page.tsx's "Refer & Earn" section). Only ever applied at
+  // signup, never at login - see POST /api/auth/otp/verify, which is the
+  // one place that actually decides which of those this is.
+  const ref = searchParams.get("ref");
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -34,6 +41,7 @@ function LoginForm() {
       await requestOtp(trimmed);
       const params = new URLSearchParams({ phone: trimmed });
       if (next) params.set("next", next);
+      if (ref) params.set("ref", ref);
       router.push(`/login/verify?${params.toString()}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
@@ -69,7 +77,16 @@ function LoginForm() {
         </div>
       </form>
 
-      <p className="mt-8 text-center text-xs text-muted">Powered by Brilliant Eight</p>
+      <div className="mt-8 flex flex-col items-center gap-1">
+        <Image
+          src="/images/brilliant-eight-logo.svg"
+          alt="Brilliant Eight"
+          width={25}
+          height={28}
+          className="opacity-70"
+        />
+        <p className="text-center text-xs text-muted">A Brilliant Eight Production</p>
+      </div>
     </AuthShell>
   );
 }
