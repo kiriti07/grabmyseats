@@ -20,10 +20,12 @@ function LoginForm() {
   // redirect - see useRequireAuth.ts and middleware.ts, which are what
   // actually set this when a protected route bounces someone here.
   const next = searchParams.get("next");
-  // The referral code from a shared link (e.g. /signup?ref=ABC123 - see
-  // account/page.tsx's "Refer & Earn" section). Only ever applied at
-  // signup, never at login - see POST /api/auth/otp/verify, which is the
-  // one place that actually decides which of those this is.
+  // The referral code from a shared link (e.g. /login?ref=ABC123 - see
+  // account/page.tsx's "Refer & Earn" section - there's no separate
+  // /signup page, this same form handles both new and returning users).
+  // Only ever applied at signup, never at login - see POST
+  // /api/auth/otp/verify, which is the one place that actually decides
+  // which of those this is.
   const ref = searchParams.get("ref");
 
   async function handleSubmit(e: FormEvent) {

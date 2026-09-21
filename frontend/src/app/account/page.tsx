@@ -40,11 +40,13 @@ export default function AccountPage() {
       .catch(() => setReferrals(null));
   }, [isAuthenticated]);
 
-  // /signup?ref=<code> (see backend's POST /api/auth/otp/verify) once
-  // referral data has loaded; falls back to the plain app link before
-  // that, or if it never loads.
+  // /login?ref=<code> (see backend's POST /api/auth/otp/verify, and
+  // /login's own ?ref= handling) once referral data has loaded; falls
+  // back to the plain app link before that, or if it never loads. There's
+  // no separate /signup page - /login already handles both new and
+  // returning users via OTP.
   const referralLink =
-    referrals && origin ? `${origin}/signup?ref=${referrals.referralCode}` : origin;
+    referrals && origin ? `${origin}/login?ref=${referrals.referralCode}` : origin;
 
   // Native share sheet where available (mobile browsers, mostly); falls
   // back to copying the link when navigator.share isn't supported (most
