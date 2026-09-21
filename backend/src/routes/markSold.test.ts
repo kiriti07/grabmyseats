@@ -53,6 +53,8 @@ describe("POST /api/listings/:id/mark-sold", () => {
   });
 
   afterAll(async () => {
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
     await prisma.user.deleteMany({ where: { id: { in: [sellerId, otherUserId] } } });
   });

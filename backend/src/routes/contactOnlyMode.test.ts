@@ -67,6 +67,8 @@ describe("PAYMENT_MODE=contact_only", () => {
 
   afterAll(async () => {
     await prisma.transaction.deleteMany({ where: { listingId } });
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
     await prisma.user.deleteMany({ where: { id: { in: [sellerId, buyerId] } } });
     vi.unstubAllEnvs();
@@ -74,7 +76,9 @@ describe("PAYMENT_MODE=contact_only", () => {
   });
 
   it("GET /api/listings/:id reports paymentMode contact_only", async () => {
-    const res = await request(app).get(`/api/listings/${listingId}`);
+    const res = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${buyerToken}`);
     expect(res.status).toBe(200);
     expect(res.body.data.listing.paymentMode).toBe("contact_only");
   });
@@ -129,6 +133,7 @@ describe("PAYMENT_MODE=contact_only", () => {
     expect(listing.status).toBe("ACTIVE");
 
     await prisma.transaction.deleteMany({ where: { buyerId: secondBuyer.id } });
+    await prisma.listingContact.deleteMany({ where: { userId: secondBuyer.id } });
     await prisma.user.delete({ where: { id: secondBuyer.id } });
   });
 

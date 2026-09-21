@@ -70,6 +70,8 @@ describe("suspension", () => {
 
   afterAll(async () => {
     await prisma.transaction.deleteMany({ where: { listingId } });
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
     await prisma.user.deleteMany({ where: { id: { in: [sellerId, buyerId] } } });
   });
@@ -78,7 +80,9 @@ describe("suspension", () => {
     const search = await request(app).get("/api/listings/search").query({ lat: LAT, lng: LNG });
     expect(search.body.data.listings.some((l: { id: string }) => l.id === listingId)).toBe(true);
 
-    const detail = await request(app).get(`/api/listings/${listingId}`);
+    const detail = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${buyerToken}`);
     expect(detail.status).toBe(200);
 
     const contact = await request(app)
@@ -117,7 +121,9 @@ describe("suspension", () => {
   });
 
   it("the suspended seller's listing detail page 404s like it doesn't exist", async () => {
-    const res = await request(app).get(`/api/listings/${listingId}`);
+    const res = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${buyerToken}`);
     expect(res.status).toBe(404);
   });
 

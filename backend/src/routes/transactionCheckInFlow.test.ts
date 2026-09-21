@@ -84,6 +84,8 @@ describe("transaction detail + check-in flow", () => {
 
   afterAll(async () => {
     await prisma.transaction.deleteMany({ where: { listingId } });
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
     await prisma.user.deleteMany({ where: { id: { in: [sellerId, buyerId] } } });
     vi.unstubAllEnvs();

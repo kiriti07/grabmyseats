@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
@@ -9,11 +9,15 @@ import { ApiError, requestOtp } from "@/lib/api";
 
 const PHONE_RE = /^\+[1-9]\d{7,14}$/;
 
-export default function LoginPage() {
+function LoginForm() {
   const [phone, setPhone] = useState("+91");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+  // Forwarded through to /login/verify, then on to the post-login
+  // redirect - see useRequireAuth.ts and middleware.ts, which are what
+  // actually set this when a protected route bounces someone here.
+  const next = useSearchParams().get("next");
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -28,7 +32,9 @@ export default function LoginPage() {
     setIsLoading(true);
     try {
       await requestOtp(trimmed);
-      router.push(`/login/verify?phone=${encodeURIComponent(trimmed)}`);
+      const params = new URLSearchParams({ phone: trimmed });
+      if (next) params.set("next", next);
+      router.push(`/login/verify?${params.toString()}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
       setIsLoading(false);
@@ -62,6 +68,16 @@ export default function LoginPage() {
           </Button>
         </div>
       </form>
+
+      <p className="mt-8 text-center text-xs text-muted">Powered by Brilliant Eight</p>
     </AuthShell>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

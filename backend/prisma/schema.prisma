@@ -35,6 +35,8 @@ model User {
   listings          Listing[]
   purchases         Transaction[] @relation("buyer")
   alerts            TicketAlert[]
+  listingViews      ListingView[]
+  listingContacts   ListingContact[]
 
   // Profile fields - see GET/PATCH /api/users/me/profile. phone is
   // deliberately not editable through that endpoint; it's the
@@ -178,20 +180,51 @@ model Listing {
   qrData          String? // if per-seat QR available
   screenshotUrl   String? // uploaded booking confirmation screenshot
   status          ListingStatus                          @default(ACTIVE)
-  // Seller-only insight, not shown anywhere public (search results or the
-  // public GET /:id detail response) - only GET /api/listings/mine exposes
-  // these (see serialize.ts's toMyListing). Incremented atomically
-  // (`{ increment: 1 }`), never read-modify-written, so concurrent
-  // requests can't lose a count.
-  viewCount       Int                                    @default(0)
-  // Incremented once per successful contact_only-mode POST /:id/reserve
-  // (the exact point seller contact info is handed to a buyer) - see that
-  // route. Always 0 in escrow mode, since that flow never reveals contact
-  // info at reserve time.
-  contactCount    Int                                    @default(0)
   createdAt       DateTime                               @default(now())
   transactions    Transaction[]
   alertNotifications AlertNotification[]
+  // Deduplicated, per-user view/contact tracking (see ListingView/
+  // ListingContact below) - viewCount/contactCount are deliberately not
+  // plain columns on this model. A row count derived from these relations
+  // (via `_count` - see serialize.ts) can never drift out of sync the way
+  // a separately-incremented counter could, and the unique constraint on
+  // each of those models' (listingId, userId) is what actually enforces
+  // "one view/contact per user per listing", not just careful call-site
+  // discipline. Visible to both the seller (GET /api/listings/mine) and
+  // any authenticated viewer (GET /api/listings/:id).
+  views           ListingView[]
+  contacts        ListingContact[]
+}
+
+// One row per (listing, user) that has viewed its detail page while
+// authenticated - see GET /api/listings/:id, which now requires auth
+// specifically so a userId exists to dedupe against here. Upserted, never
+// plain-created, so a repeat view by the same user is a no-op instead of
+// hitting the unique constraint below as a duplicate-key error.
+model ListingView {
+  id        String   @id @default(cuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([listingId, userId])
+}
+
+// Same shape and upsert discipline as ListingView, but for a buyer
+// requesting the seller's contact info via the contact_only-mode POST
+// /:id/reserve flow - one row per (listing, user) that has ever received
+// that seller's contact details for this listing.
+model ListingContact {
+  id        String   @id @default(cuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([listingId, userId])
 }
 
 enum TxnStatus {

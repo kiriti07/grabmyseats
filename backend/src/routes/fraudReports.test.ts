@@ -73,6 +73,8 @@ describe("fraud reports", () => {
   afterAll(async () => {
     await prisma.fraudReport.deleteMany({ where: { id: { in: reportIds } } });
     await prisma.transaction.deleteMany({ where: { listingId } });
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
     await prisma.user.deleteMany({ where: { id: { in: [reporterId, reportedId] } } });
     await prisma.adminUser.delete({ where: { id: adminId } });

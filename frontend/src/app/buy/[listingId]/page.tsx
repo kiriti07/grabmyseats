@@ -121,6 +121,10 @@ function ListingDetailContent() {
             <p className="mt-1 flex items-center gap-1 text-sm text-muted">
               Seller: <RatingSummaryBadge summary={listing.sellerRatingSummary} />
             </p>
+            <p className="mt-1 text-xs text-muted">
+              {listing.viewCount} view{listing.viewCount === 1 ? "" : "s"} ·{" "}
+              {listing.contactCount} contacted
+            </p>
 
             <dl className="mt-4 flex flex-col gap-1.5 text-sm">
               <div className="flex justify-between">

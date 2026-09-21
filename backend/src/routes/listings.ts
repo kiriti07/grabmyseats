@@ -532,7 +532,7 @@ listingsRouter.get("/search", async (req, res) => {
 listingsRouter.get("/mine", requireAuth, async (req, res) => {
   const listings = await prisma.listing.findMany({
     where: { sellerId: req.user!.id },
-    include: { transactions: true },
+    include: { transactions: true, _count: { select: { views: true, contacts: true } } },
     orderBy: { createdAt: "desc" },
   });
 
@@ -543,11 +543,18 @@ listingsRouter.get("/mine", requireAuth, async (req, res) => {
   res.json(body);
 });
 
-// Public detail view for a single listing - same public-safe fields as
-// /search, plus totalSeats/status. lat/lng are optional: pass them (e.g.
-// forwarded from the search page's resolved location) to get distanceKm
-// back too; omit them for a direct link, where distanceKm comes back null.
-listingsRouter.get("/:id", async (req, res) => {
+// Detail view for a single listing - same public-safe fields as /search,
+// plus totalSeats/status, and now viewCount/contactCount (see toMyListing's
+// comment and ListingView/ListingContact in schema.prisma for why those
+// are derived row counts, not plain columns). lat/lng are optional: pass
+// them (e.g. forwarded from the search page's resolved location) to get
+// distanceKm back too; omit them for a direct link, where distanceKm comes
+// back null.
+//
+// requireAuth: a change from this route's previous no-auth access -
+// recording a deduplicated view needs a userId to dedupe against, so an
+// anonymous request has nothing to key a ListingView row on.
+listingsRouter.get("/:id", requireAuth, async (req, res) => {
   const listingId = req.params.id as string;
   const lat = requireFiniteNumber(req.query.lat);
   const lng = requireFiniteNumber(req.query.lng);
@@ -567,15 +574,26 @@ listingsRouter.get("/:id", async (req, res) => {
     return;
   }
 
-  // Seller-only insight surfaced on GET /api/listings/mine (see
-  // toMyListing) - counts every load of this detail page, including
-  // anonymous/unauthenticated ones, which is deliberate: anonymous
-  // browsing is exactly the traffic a seller wants visibility into.
-  // `{ increment: 1 }` compiles to a single atomic UPDATE, so concurrent
-  // requests for the same listing can't clobber each other's count.
-  await prisma.listing.update({
+  // One row per (listing, viewer) - the unique constraint on
+  // (listingId, userId) is what actually enforces "one view per user",
+  // not this upsert alone. upsert (rather than create) is what turns a
+  // repeat view by the same user into a no-op instead of a duplicate-key
+  // error; the empty `update` means an existing row is left untouched.
+  // Excludes the listing's own seller - a seller checking their own
+  // listing (e.g. from a shared link, or the confirmation screen after
+  // creating it) should never inflate the count they themselves see on
+  // GET /api/listings/mine.
+  if (req.user!.id !== listing.sellerId) {
+    await prisma.listingView.upsert({
+      where: { listingId_userId: { listingId, userId: req.user!.id } },
+      update: {},
+      create: { listingId, userId: req.user!.id },
+    });
+  }
+
+  const counts = await prisma.listing.findUniqueOrThrow({
     where: { id: listingId },
-    data: { viewCount: { increment: 1 } },
+    select: { _count: { select: { views: true, contacts: true } } },
   });
 
   const distanceKm =
@@ -587,7 +605,15 @@ listingsRouter.get("/:id", async (req, res) => {
 
   const body: ApiResponse<{ listing: ListingDetail }> = {
     success: true,
-    data: { listing: toListingDetail(listing, distanceKm, sellerRatingSummary) },
+    data: {
+      listing: toListingDetail(
+        listing,
+        distanceKm,
+        sellerRatingSummary,
+        counts._count.views,
+        counts._count.contacts,
+      ),
+    },
   };
   res.json(body);
 });
@@ -790,14 +816,17 @@ listingsRouter.post("/:id/reserve", requireAuth, async (req, res) => {
         hasWhatsapp: seller.hasWhatsapp,
         ratingSummary: await getRatingSummary(sellerId),
       };
-      // Seller-only insight (see toMyListing) - incremented right here,
-      // not on every /:id/reserve call, since this is the one point that
-      // actually hands contact info to a buyer (the escrow-mode branch
-      // above never sets `contact` at all). `{ increment: 1 }` is a single
-      // atomic UPDATE, safe under concurrent requests for the same listing.
-      await prisma.listing.update({
-        where: { id: listingId },
-        data: { contactCount: { increment: 1 } },
+      // One row per (listing, buyer) - recorded right here, not on every
+      // /:id/reserve call, since this is the one point that actually
+      // hands contact info to a buyer (the escrow-mode branch above never
+      // sets `contact` at all). Same upsert discipline as GET /:id's
+      // ListingView: the unique constraint on (listingId, userId)
+      // enforces dedup, and the empty `update` makes a repeat request
+      // from the same buyer a no-op instead of a duplicate-key error.
+      await prisma.listingContact.upsert({
+        where: { listingId_userId: { listingId, userId: req.user!.id } },
+        update: {},
+        create: { listingId, userId: req.user!.id },
       });
     }
 

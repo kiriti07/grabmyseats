@@ -79,6 +79,8 @@ describe("ratings", () => {
   afterAll(async () => {
     await prisma.rating.deleteMany({ where: { ratedUserId: sellerId } });
     await prisma.transaction.deleteMany({ where: { listingId } });
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
     await prisma.user.deleteMany({ where: { id: { in: [sellerId, buyerId, strangerId] } } });
   });
@@ -96,7 +98,9 @@ describe("ratings", () => {
   });
 
   it("GET /api/listings/:id embeds the seller's rating summary", async () => {
-    const res = await request(app).get(`/api/listings/${listingId}`);
+    const res = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${buyerToken}`);
     expect(res.status).toBe(200);
     expect(res.body.data.listing.sellerRatingSummary).toEqual({
       averageStars: null,

@@ -93,6 +93,8 @@ describe("delivery method", () => {
     afterAll(async () => {
       await prisma.manualReviewFlag.deleteMany({ where: { transaction: { listingId } } });
       await prisma.transaction.deleteMany({ where: { listingId } });
+      await prisma.listingView.deleteMany({ where: { listingId } });
+      await prisma.listingContact.deleteMany({ where: { listingId } });
       await prisma.listing.delete({ where: { id: listingId } });
       await prisma.user.deleteMany({ where: { id: { in: [sellerId, buyerId] } } });
     });
@@ -257,6 +259,12 @@ describe("delivery method", () => {
 
     afterAll(async () => {
       await prisma.transaction.deleteMany({
+        where: { listingId: { in: [inPersonOnlyListingId, emailForwardListingId] } },
+      });
+      await prisma.listingView.deleteMany({
+        where: { listingId: { in: [inPersonOnlyListingId, emailForwardListingId] } },
+      });
+      await prisma.listingContact.deleteMany({
         where: { listingId: { in: [inPersonOnlyListingId, emailForwardListingId] } },
       });
       await prisma.listing.deleteMany({

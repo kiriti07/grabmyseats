@@ -109,6 +109,12 @@ export interface ListingDetail {
   // endpoint never has, and still doesn't, carry sellerId - see GET
   // /api/users/:id/rating-summary for the identified equivalent).
   sellerRatingSummary: RatingSummary;
+  // Deduplicated per-user counts (see ListingView/ListingContact in
+  // schema.prisma) - visible to any authenticated viewer, not just the
+  // seller. This endpoint itself now requires auth (see the route), which
+  // is what lets it record the viewer's own ListingView row.
+  viewCount: number;
+  contactCount: number;
 }
 
 // GET /api/listings/mine response: the seller's own view of a listing.
@@ -144,12 +150,11 @@ export interface MyListing {
   availableDeliveryMethods: DeliveryMethod[];
   createdAt: string;
   transactions: MyListingTransactionSummary[];
-  // Seller-only insight - deliberately not on ListingSearchResult or
-  // ListingDetail above, since a seller's view/contact counts shouldn't be
-  // visible to buyers or competitors. viewCount increments on every GET
-  // /api/listings/:id load (including anonymous ones); contactCount
-  // increments once per contact_only-mode POST /:id/reserve, at the exact
-  // point seller contact info is handed to a buyer.
+  // Same deduplicated, per-user counts as ListingDetail.viewCount/
+  // contactCount above (both derived from ListingView/ListingContact row
+  // counts - see schema.prisma) - not seller-exclusive, just also shown
+  // here for the seller's own dashboard. Deliberately still not on
+  // ListingSearchResult, which stays a lighter-weight list shape.
   viewCount: number;
   contactCount: number;
 }

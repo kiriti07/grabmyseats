@@ -53,6 +53,8 @@ describe("showtime round-trips exactly, with no timezone drift", () => {
   });
 
   afterAll(async () => {
+    await prisma.listingView.deleteMany({ where: { listingId: { in: listingIds } } });
+    await prisma.listingContact.deleteMany({ where: { listingId: { in: listingIds } } });
     await prisma.listing.deleteMany({ where: { id: { in: listingIds } } });
     await prisma.user.delete({ where: { id: sellerId } });
   });
@@ -83,7 +85,9 @@ describe("showtime round-trips exactly, with no timezone drift", () => {
     const stored = await prisma.listing.findUniqueOrThrow({ where: { id: listingId } });
     expect(stored.showtime.toISOString()).toBe(SHOWTIME_ISO);
 
-    const detail = await request(app).get(`/api/listings/${listingId}`);
+    const detail = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${sellerToken}`);
     expect(detail.body.data.listing.showtime).toBe(SHOWTIME_ISO);
 
     const mine = await request(app)

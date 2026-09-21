@@ -41,6 +41,8 @@ describe("GET /api/listings/search theater-name matching", () => {
   });
 
   afterAll(async () => {
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
     await prisma.user.delete({ where: { id: sellerId } });
   });

@@ -40,6 +40,8 @@ describe("category", () => {
   });
 
   afterAll(async () => {
+    await prisma.listingView.deleteMany({ where: { listingId: { in: listingIds } } });
+    await prisma.listingContact.deleteMany({ where: { listingId: { in: listingIds } } });
     await prisma.listing.deleteMany({ where: { id: { in: listingIds } } });
     await prisma.user.delete({ where: { id: sellerId } });
   });
@@ -101,7 +103,9 @@ describe("category", () => {
       const listingId = created.body.data.listing.id;
       listingIds.push(listingId);
 
-      const detail = await request(app).get(`/api/listings/${listingId}`);
+      const detail = await request(app)
+        .get(`/api/listings/${listingId}`)
+        .set("Authorization", `Bearer ${sellerToken}`);
       expect(detail.body.data.listing.category).toBe("SPORT");
 
       const mine = await request(app)

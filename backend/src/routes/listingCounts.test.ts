@@ -7,16 +7,21 @@ import { app } from "../app";
 import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
 
-// Seller-only view/contact-count tracking (see the schema comment on
-// Listing.viewCount/contactCount, and toMyListing in lib/serialize.ts).
-// Two things to prove: the counters actually increment at the right
-// points, and they never leak into a buyer-facing response.
-describe("listing view/contact counts", () => {
+// Deduplicated, per-user view/contact tracking (see ListingView/
+// ListingContact in schema.prisma, and toListingDetail/toMyListing in
+// lib/serialize.ts). Both counts are derived from row counts - a unique
+// constraint on (listingId, userId) is what actually enforces "one view/
+// contact per user per listing", not just this test suite's expectations.
+describe("listing view tracking", () => {
   const LAT = 12.9716;
   const LNG = 77.5946;
 
   let sellerId: string;
   let sellerToken: string;
+  let viewer1Id: string;
+  let viewer1Token: string;
+  let viewer2Id: string;
+  let viewer2Token: string;
   let listingId: string;
 
   beforeAll(async () => {
@@ -24,8 +29,18 @@ describe("listing view/contact counts", () => {
     const seller = await prisma.user.create({
       data: { phone: `+1555countseller${suffix}`.slice(0, 30), name: "Count Test Seller" },
     });
+    const viewer1 = await prisma.user.create({
+      data: { phone: `+1555countviewer1${suffix}`.slice(0, 30) },
+    });
+    const viewer2 = await prisma.user.create({
+      data: { phone: `+1555countviewer2${suffix}`.slice(0, 30) },
+    });
     sellerId = seller.id;
     sellerToken = await issueSessionToken(seller);
+    viewer1Id = viewer1.id;
+    viewer1Token = await issueSessionToken(viewer1);
+    viewer2Id = viewer2.id;
+    viewer2Token = await issueSessionToken(viewer2);
 
     const listing = await prisma.listing.create({
       data: {
@@ -46,28 +61,67 @@ describe("listing view/contact counts", () => {
 
   afterAll(async () => {
     await prisma.transaction.deleteMany({ where: { listingId } });
+    // Scoped by listingId (not userId) - removes every view/contact row
+    // this describe block created, for any of the three users below, so
+    // deleting those users afterward never trips the FK constraint.
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
-    await prisma.user.delete({ where: { id: sellerId } });
+    await prisma.user.deleteMany({ where: { id: { in: [sellerId, viewer1Id, viewer2Id] } } });
   });
 
-  it("increments viewCount on each anonymous GET /api/listings/:id load", async () => {
-    const before = await prisma.listing.findUniqueOrThrow({ where: { id: listingId } });
-    expect(before.viewCount).toBe(0);
-
-    // No Authorization header at all - anonymous browsing must count too.
-    await request(app).get(`/api/listings/${listingId}`);
-    await request(app).get(`/api/listings/${listingId}`);
-    await request(app).get(`/api/listings/${listingId}`);
-
-    const after = await prisma.listing.findUniqueOrThrow({ where: { id: listingId } });
-    expect(after.viewCount).toBe(3);
-  });
-
-  it("never exposes viewCount or contactCount on the public GET /:id detail response", async () => {
+  it("requires authentication - no token is a 401, not a public view", async () => {
     const res = await request(app).get(`/api/listings/${listingId}`);
+    expect(res.status).toBe(401);
+  });
+
+  it("the seller viewing their own listing is never recorded as a view", async () => {
+    const res = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${sellerToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.data.listing.viewCount).toBeUndefined();
-    expect(res.body.data.listing.contactCount).toBeUndefined();
+    expect(res.body.data.listing.viewCount).toBe(0);
+
+    const rows = await prisma.listingView.findMany({ where: { listingId, userId: sellerId } });
+    expect(rows).toHaveLength(0);
+  });
+
+  it("viewing as the same user twice does not increase viewCount", async () => {
+    const first = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${viewer1Token}`);
+    expect(first.status).toBe(200);
+    expect(first.body.data.listing.viewCount).toBe(1);
+
+    const second = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${viewer1Token}`);
+    expect(second.status).toBe(200);
+    expect(second.body.data.listing.viewCount).toBe(1);
+
+    // Same guarantee at the row level, not just the serialized count -
+    // the unique constraint on (listingId, userId) is the actual source
+    // of truth.
+    const rows = await prisma.listingView.findMany({ where: { listingId, userId: viewer1Id } });
+    expect(rows).toHaveLength(1);
+  });
+
+  it("viewing as a second, different user does increase viewCount", async () => {
+    const res = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${viewer2Token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.listing.viewCount).toBe(2);
+  });
+
+  it("the counts appear in the public (buyer-facing) detail response - not seller-only", async () => {
+    const res = await request(app)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${viewer1Token}`);
+    expect(res.status).toBe(200);
+    expect(typeof res.body.data.listing.viewCount).toBe("number");
+    expect(typeof res.body.data.listing.contactCount).toBe("number");
+    expect(res.body.data.listing.contactCount).toBe(0);
   });
 
   it("never exposes viewCount or contactCount on GET /api/listings/search results", async () => {
@@ -79,16 +133,15 @@ describe("listing view/contact counts", () => {
     expect(found.contactCount).toBeUndefined();
   });
 
-  it("exposes both counts to the seller on GET /api/listings/mine", async () => {
+  it("exposes both counts to the seller on GET /api/listings/mine, matching the public detail values", async () => {
     const res = await request(app)
       .get("/api/listings/mine")
       .set("Authorization", `Bearer ${sellerToken}`);
     expect(res.status).toBe(200);
     const found = res.body.data.listings.find((l: { id: string }) => l.id === listingId);
     expect(found).toBeDefined();
-    // >= rather than exact, since the three GET /:id loads above already
-    // happened against this same listing earlier in this file.
-    expect(found.viewCount).toBeGreaterThanOrEqual(3);
+    // Exactly 2 - both distinct viewers above, no more (repeat view was a no-op).
+    expect(found.viewCount).toBe(2);
     expect(found.contactCount).toBe(0);
   });
 });
@@ -97,7 +150,7 @@ describe("listing view/contact counts", () => {
 // branch of POST /:id/reserve never sets `contact` at all) - same
 // module-reload pattern as contactOnlyMode.test.ts, since PAYMENT_MODE is
 // read once at module load (lib/config.ts).
-describe("contactCount increments on contact_only-mode reserve", () => {
+describe("contactCount tracking (contact_only mode)", () => {
   const LAT = 12.9716;
   const LNG = 77.5946;
 
@@ -144,28 +197,38 @@ describe("contactCount increments on contact_only-mode reserve", () => {
 
   afterAll(async () => {
     await prisma.transaction.deleteMany({ where: { listingId } });
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
     await prisma.user.deleteMany({ where: { id: { in: [sellerId, buyerId] } } });
     vi.unstubAllEnvs();
     vi.resetModules();
   });
 
-  it("increments contactCount exactly when contact info is handed to a buyer, not before", async () => {
-    const before = await prisma.listing.findUniqueOrThrow({ where: { id: listingId } });
-    expect(before.contactCount).toBe(0);
-
-    const res = await request(contactOnlyApp)
+  it("requesting contact twice as the same buyer does not increase contactCount", async () => {
+    const first = await request(contactOnlyApp)
       .post(`/api/listings/${listingId}/reserve`)
       .set("Authorization", `Bearer ${buyerToken}`)
       .send({ seats: 1 });
-    expect(res.status).toBe(201);
-    expect(res.body.data.contact).not.toBeNull();
+    expect(first.status).toBe(201);
+    expect(first.body.data.contact).not.toBeNull();
 
-    const after = await prisma.listing.findUniqueOrThrow({ where: { id: listingId } });
-    expect(after.contactCount).toBe(1);
+    const second = await request(contactOnlyApp)
+      .post(`/api/listings/${listingId}/reserve`)
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ seats: 1 });
+    expect(second.status).toBe(201);
+
+    const rows = await prisma.listingContact.findMany({ where: { listingId, userId: buyerId } });
+    expect(rows).toHaveLength(1);
+
+    const detail = await request(contactOnlyApp)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+    expect(detail.body.data.listing.contactCount).toBe(1);
   });
 
-  it("increments again for a second buyer requesting contact on the same listing", async () => {
+  it("a second, different buyer requesting contact does increase contactCount", async () => {
     const suffix = randomUUID();
     const secondBuyer = await prisma.user.create({
       data: { phone: `+1555ccbuyer2${suffix}`.slice(0, 30) },
@@ -178,10 +241,18 @@ describe("contactCount increments on contact_only-mode reserve", () => {
       .send({ seats: 1 });
     expect(res.status).toBe(201);
 
-    const after = await prisma.listing.findUniqueOrThrow({ where: { id: listingId } });
-    expect(after.contactCount).toBe(2);
+    const detail = await request(contactOnlyApp)
+      .get(`/api/listings/${listingId}`)
+      .set("Authorization", `Bearer ${secondBuyerToken}`);
+    expect(detail.body.data.listing.contactCount).toBe(2);
+    // 2 distinct viewers so far: the first buyer's own GET /:id call in
+    // the previous test, plus this one - each counted once, per the
+    // dedup guarantee covered in the describe block above.
+    expect(detail.body.data.listing.viewCount).toBe(2);
 
     await prisma.transaction.deleteMany({ where: { buyerId: secondBuyer.id } });
+    await prisma.listingView.deleteMany({ where: { userId: secondBuyer.id } });
+    await prisma.listingContact.deleteMany({ where: { userId: secondBuyer.id } });
     await prisma.user.delete({ where: { id: secondBuyer.id } });
   });
 });

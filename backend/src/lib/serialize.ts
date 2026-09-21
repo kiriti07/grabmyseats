@@ -69,10 +69,17 @@ export function toSharedListing(listing: PrismaListing): SharedListing {
 // shared/src/listing.ts. Buyers never see the raw screenshot pre-purchase
 // (it exposes the QR code and booking ID); it's only ever revealed via
 // GET /api/transactions/:id/screenshot once the transaction is escrowed.
+//
+// viewCount/contactCount are passed in rather than read off `listing`
+// because they're derived counts (ListingView/ListingContact row counts -
+// see schema.prisma), not columns on the Listing row itself; the caller
+// (GET /api/listings/:id) fetches them via a `_count` query.
 export function toListingDetail(
   listing: PrismaListing,
   distanceKm: number | null,
   sellerRatingSummary: RatingSummary,
+  viewCount: number,
+  contactCount: number,
 ): ListingDetail {
   return {
     id: listing.id,
@@ -88,11 +95,16 @@ export function toListingDetail(
     availableDeliveryMethods: listing.availableDeliveryMethods,
     paymentMode: PAYMENT_MODE,
     sellerRatingSummary,
+    viewCount,
+    contactCount,
   };
 }
 
 export function toMyListing(
-  listing: PrismaListing & { transactions: PrismaTransaction[] },
+  listing: PrismaListing & {
+    transactions: PrismaTransaction[];
+    _count: { views: number; contacts: number };
+  },
 ): MyListing {
   return {
     id: listing.id,
@@ -115,8 +127,8 @@ export function toMyListing(
     status: listing.status,
     availableDeliveryMethods: listing.availableDeliveryMethods,
     createdAt: listing.createdAt.toISOString(),
-    viewCount: listing.viewCount,
-    contactCount: listing.contactCount,
+    viewCount: listing._count.views,
+    contactCount: listing._count.contacts,
     transactions: listing.transactions.map((txn) => ({
       id: txn.id,
       seatsCount: txn.seatsCount,

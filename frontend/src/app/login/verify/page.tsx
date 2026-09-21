@@ -12,11 +12,21 @@ import { ApiError, requestOtp, verifyOtpCode } from "@/lib/api";
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
+// Only ever a same-origin path forwarded from useRequireAuth.ts/
+// middleware.ts's own `next` params - never trust it as a full URL
+// (an absolute or protocol-relative value here would be an open redirect
+// straight after login).
+function safeNextPath(next: string | null): string {
+  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+  return "/";
+}
+
 function VerifyForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { login } = useAuth();
   const phone = searchParams.get("phone") ?? "";
+  const next = safeNextPath(searchParams.get("next"));
 
   const [code, setCode] = useState("");
   const [otpKey, setOtpKey] = useState(0);
@@ -51,7 +61,7 @@ function VerifyForm() {
     try {
       const { user, token } = await verifyOtpCode(phone, code);
       login(token, user);
-      router.replace("/");
+      router.replace(next);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
       setIsVerifying(false);
@@ -79,7 +89,10 @@ function VerifyForm() {
     <AuthShell title="Enter the code" subtitle={`We sent a 6-digit code to ${phone || "your phone"}`}>
       <div className="mb-4 flex items-center justify-center gap-2 text-sm text-muted">
         <span>{phone}</span>
-        <Link href="/login" className="font-medium text-gold hover:text-gold-dim">
+        <Link
+          href={next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`}
+          className="font-medium text-gold hover:text-gold-dim"
+        >
           edit
         </Link>
       </div>

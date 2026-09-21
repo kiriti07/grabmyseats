@@ -92,6 +92,8 @@ describe("POST /api/admin/transactions/:id/refund", () => {
   afterAll(async () => {
     await prisma.manualReviewFlag.deleteMany({ where: { transactionId } });
     await prisma.transaction.deleteMany({ where: { listingId } });
+    await prisma.listingView.deleteMany({ where: { listingId } });
+    await prisma.listingContact.deleteMany({ where: { listingId } });
     await prisma.listing.delete({ where: { id: listingId } });
     await prisma.user.deleteMany({ where: { id: { in: [sellerId, buyerId] } } });
     await prisma.adminUser.delete({ where: { id: adminId } });
