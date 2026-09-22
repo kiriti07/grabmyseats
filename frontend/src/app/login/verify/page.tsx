@@ -62,9 +62,19 @@ function VerifyForm() {
 
     setIsVerifying(true);
     try {
-      const { user, token } = await verifyOtpCode(phone, code, ref ?? undefined);
+      const { user, token, isNewAccount } = await verifyOtpCode(phone, code, ref ?? undefined);
       login(token, user);
-      router.replace(next);
+      if (isNewAccount) {
+        // Referral linking (if any) already happened inside the verify
+        // call above - this step never needs the ref code itself, just
+        // has to carry `next` one step further so the eventual redirect
+        // still lands where the visitor was originally headed. A
+        // returning user (isNewAccount: false) skips straight to `next`,
+        // exactly as before.
+        router.replace(`/login/welcome?next=${encodeURIComponent(next)}`);
+      } else {
+        router.replace(next);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
       setIsVerifying(false);
