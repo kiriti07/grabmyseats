@@ -1,5 +1,6 @@
 import { schedule } from "node-cron";
 import { expireReservations } from "./expireReservations";
+import { expireListings } from "./expireListings";
 import { autoConfirmStaleEscrows } from "./autoConfirmStaleEscrows";
 import { releasePayouts } from "./releasePayouts";
 import { matchAlerts } from "./matchAlerts";
@@ -17,6 +18,22 @@ export function startJobs(): void {
       }
     },
     { name: "expire-reservations", noOverlap: true },
+  );
+
+  // Every 5 minutes, not every minute: a listing sitting live for a few
+  // extra minutes past its showtime is harmless, and nothing downstream
+  // needs tighter granularity than that.
+  schedule(
+    "*/5 * * * *",
+    async () => {
+      try {
+        const count = await expireListings();
+        if (count > 0) console.log(`[jobs] expired ${count} listing(s)`);
+      } catch (err) {
+        console.error("[jobs] expireListings failed", err);
+      }
+    },
+    { name: "expire-listings", noOverlap: true },
   );
 
   schedule(

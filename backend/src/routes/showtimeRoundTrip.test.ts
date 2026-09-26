@@ -113,9 +113,13 @@ describe("showtime round-trips exactly, with no timezone drift", () => {
     const listingId = created.body.data.listing.id;
     listingIds.push(listingId);
 
-    // A distinct wall-clock value from the create-time one above, so this
-    // isn't just re-verifying the same instant.
-    const NEW_SHOWTIME_ISO = "2026-09-22T09:15:00.000Z";
+    // Computed (not a hardcoded literal) so this test doesn't go stale the
+    // moment the calendar catches up to it - PATCH rejects a showtime
+    // that isn't in the future, so a fixed past-tense date here 400s
+    // instead of exercising the round-trip. 48h out, not 24h like the
+    // create-time value above, so it's a distinct wall-clock value and
+    // this isn't just re-verifying the same instant.
+    const NEW_SHOWTIME_ISO = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
     const patched = await request(app)
       .patch(`/api/listings/${listingId}`)
       .set("Authorization", `Bearer ${sellerToken}`)
