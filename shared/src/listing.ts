@@ -115,6 +115,11 @@ export interface ListingDetail {
   // is what lets it record the viewer's own ListingView row.
   viewCount: number;
   contactCount: number;
+  // The seller's verification status (see isVerified on User in
+  // ./user.ts) - embedded the same way sellerRatingSummary above is,
+  // without exposing the seller's identity (this endpoint still never
+  // carries sellerId).
+  sellerIsVerified: boolean;
 }
 
 // GET /api/listings/mine response: the seller's own view of a listing.

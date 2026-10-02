@@ -16,6 +16,12 @@ import { getRatingSummary } from "../lib/ratingSummary";
 import { getReferralSummary } from "../lib/referral";
 import { toSharedUser } from "../lib/serialize";
 import { isValidEmail } from "../lib/validators";
+import { APP_URL } from "../lib/config";
+import { emailProvider } from "../lib/email";
+import {
+  consumeEmailVerificationToken,
+  issueEmailVerificationToken,
+} from "../lib/emailVerificationStore";
 
 export const usersRouter = Router();
 
@@ -130,6 +136,14 @@ usersRouter.patch("/me/profile", requireAuth, uploadProfileImage, async (req, re
         address,
         hasWhatsapp,
         ...(profileImageUrl ? { profileImageUrl } : {}),
+        // email is a full replace (see the comment above) - whenever it
+        // actually changes (including clearing it to null), any prior
+        // verification no longer applies to whatever's on file now, so
+        // this must be re-verified via POST /me/email/send-verification.
+        // Left untouched when the submitted email matches what's already
+        // on file, so a no-op PATCH never un-verifies an already-verified
+        // address.
+        ...(email !== req.user!.email ? { emailVerifiedAt: null } : {}),
       },
     });
 
@@ -153,4 +167,76 @@ usersRouter.patch("/me/profile", requireAuth, uploadProfileImage, async (req, re
     }
     throw err;
   }
+});
+
+// Sends a verification link to this user's *current* email - see
+// lib/email (the ConsoleEmailProvider dev stub) and
+// lib/emailVerificationStore.ts (the Redis-backed, single-use token,
+// same TTL-in-Redis pattern as OTP). The link itself points at the
+// frontend (APP_URL), which hits GET /me/email/verify below with the
+// token as a query param.
+usersRouter.post("/me/email/send-verification", requireAuth, async (req, res) => {
+  const email = req.user!.email;
+  if (!email) {
+    const body: ApiResponse<never> = { success: false, error: "No email on file" };
+    res.status(400).json(body);
+    return;
+  }
+  if (req.user!.emailVerifiedAt) {
+    const body: ApiResponse<never> = { success: false, error: "Email is already verified" };
+    res.status(409).json(body);
+    return;
+  }
+
+  const token = await issueEmailVerificationToken(req.user!.id, email);
+  const link = `${APP_URL}/verify-email?token=${token}`;
+  await emailProvider.send(
+    email,
+    "Verify your GrabMySeats email",
+    `Verify your email by visiting: ${link}`,
+  );
+
+  const body: ApiResponse<{ message: string }> = {
+    success: true,
+    data: { message: "Verification email sent" },
+  };
+  res.json(body);
+});
+
+// Single-use link clicked from the email above - deliberately not gated
+// behind requireAuth. The token itself (see lib/emailVerificationStore.ts)
+// already identifies the user, and the only person who could ever have it
+// is whoever received the email, so requiring an active session on top
+// would just break the common case of opening the link on a different
+// device/browser than the one that's signed in. Still re-checks the
+// token's email against the user's *current* email (not just that the
+// token itself is valid/unexpired), so a token issued for an old address
+// can never verify a new one after an intervening PATCH /me/profile email
+// change.
+usersRouter.get("/me/email/verify", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  if (!token) {
+    const body: ApiResponse<never> = { success: false, error: "token is required" };
+    res.status(400).json(body);
+    return;
+  }
+
+  const payload = await consumeEmailVerificationToken(token);
+  const user = payload ? await prisma.user.findUnique({ where: { id: payload.userId } }) : null;
+  if (!payload || !user || user.email !== payload.email) {
+    const body: ApiResponse<never> = { success: false, error: "Invalid or expired token" };
+    res.status(401).json(body);
+    return;
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: { emailVerifiedAt: new Date() },
+  });
+
+  const body: ApiResponse<{ user: SharedUser }> = {
+    success: true,
+    data: { user: toSharedUser(updated) },
+  };
+  res.json(body);
 });

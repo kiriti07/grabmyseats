@@ -21,3 +21,12 @@ import type { PaymentMode } from "@grabmyseats/shared";
 //     contact_only mode.
 export const PAYMENT_MODE: PaymentMode =
   process.env.PAYMENT_MODE === "contact_only" ? "contact_only" : "escrow";
+
+// Canonical frontend origin used to build links embedded in outgoing
+// emails (currently just the email-verification link - see
+// routes/users.ts's POST /me/email/send-verification). Distinct from
+// FRONTEND_ORIGIN (app.ts's CORS allowlist, which can hold multiple
+// comma-separated origins) - this is the one, single origin a link should
+// actually point at. Defaults to the production apex domain so a missing
+// env var in dev still produces a syntactically valid link.
+export const APP_URL = process.env.APP_URL ?? "https://grabmyseats.com";

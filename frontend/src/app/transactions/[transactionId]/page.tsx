@@ -13,6 +13,7 @@ import type {
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { RatingSummaryBadge } from "@/components/ui/RatingSummaryBadge";
+import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
 import { ReportUserButton } from "@/components/report/ReportUserButton";
 import { WhatsAppButton } from "@/components/ui/WhatsAppButton";
 import { formatShowtimeFull, formatTimeOnly } from "@/lib/format";
@@ -527,8 +528,9 @@ function ContactOnlyDetail({
         <div className="mt-4 rounded-lg border border-line bg-surface-raised p-4">
           {contact ? (
             <>
-              <p className="text-sm font-medium text-foreground">
+              <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                 {contact.name ?? `The ${otherPartyLabel}`}
+                {contact.isVerified && <VerifiedBadge />}
               </p>
               {contact.ratingSummary && (
                 <RatingSummaryBadge summary={contact.ratingSummary} className="mt-0.5 block" />
@@ -760,7 +762,10 @@ function ContactSection({
       <p className="font-display text-lg tracking-wide text-foreground">Contact</p>
       {contact && (
         <div className="mt-2 text-sm">
-          <p className="text-foreground">{contact.name ?? "The other party"}</p>
+          <p className="flex items-center gap-1.5 text-foreground">
+            {contact.name ?? "The other party"}
+            {contact.isVerified && <VerifiedBadge />}
+          </p>
           {contact.ratingSummary && (
             <RatingSummaryBadge summary={contact.ratingSummary} className="mt-0.5 block" />
           )}

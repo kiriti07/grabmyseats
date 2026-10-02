@@ -96,6 +96,7 @@ describe("PAYMENT_MODE=contact_only", () => {
       phone: sellerPhone,
       hasWhatsapp: false,
       ratingSummary: { averageStars: null, totalRatings: 0, recentComments: [] },
+      isVerified: false,
     });
     expect(res.body.data.transaction.status).toBe("RESERVED");
     expect(res.body.data.transaction.deliveryMethod).toBe("IN_PERSON");
@@ -147,6 +148,7 @@ describe("PAYMENT_MODE=contact_only", () => {
       phone: sellerPhone,
       hasWhatsapp: false,
       ratingSummary: { averageStars: null, totalRatings: 0, recentComments: [] },
+      isVerified: false,
     });
   });
 

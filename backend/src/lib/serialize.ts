@@ -24,6 +24,25 @@ import type {
 } from "@grabmyseats/shared";
 import { PAYMENT_MODE } from "./config";
 
+// true when the user has a confirmed email on file - phone itself is
+// implicitly confirmed for any logged-in user (OTP-verified at login), so
+// that's not a separate condition here. Checks email is non-null (not just
+// emailVerifiedAt) purely for clarity/defense-in-depth: PATCH
+// /api/users/me/profile already clears emailVerifiedAt whenever email
+// changes to anything else, including clearing it to null, so in practice
+// emailVerifiedAt can never be set while email is null - but a user with no
+// email should never read as verified even if that invariant were ever
+// violated. Used by toSharedUser below, and by the ListingDetail/
+// TransactionContact call sites that embed a seller/contact's verification
+// status without exposing their full identity (same pattern as
+// sellerRatingSummary/ratingSummary).
+export function isUserVerified(user: {
+  email: string | null;
+  emailVerifiedAt: Date | null;
+}): boolean {
+  return user.email !== null && user.emailVerifiedAt !== null;
+}
+
 export function toSharedUser(user: PrismaUser): SharedUser {
   return {
     id: user.id,
@@ -39,6 +58,7 @@ export function toSharedUser(user: PrismaUser): SharedUser {
     gender: user.gender,
     address: user.address,
     hasWhatsapp: user.hasWhatsapp,
+    isVerified: isUserVerified(user),
   };
 }
 
@@ -80,6 +100,7 @@ export function toListingDetail(
   sellerRatingSummary: RatingSummary,
   viewCount: number,
   contactCount: number,
+  sellerIsVerified: boolean,
 ): ListingDetail {
   return {
     id: listing.id,
@@ -97,6 +118,7 @@ export function toListingDetail(
     sellerRatingSummary,
     viewCount,
     contactCount,
+    sellerIsVerified,
   };
 }
 

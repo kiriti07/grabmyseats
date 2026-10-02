@@ -31,6 +31,7 @@ import { consumeListingSeats } from "../lib/listingSeats";
 import { getRatingSummary } from "../lib/ratingSummary";
 import { checkAndAwardReferralMilestone } from "../lib/referral";
 import {
+  isUserVerified,
   toListingDetail,
   toMyListing,
   toSharedListing,
@@ -569,7 +570,9 @@ listingsRouter.get("/:id", requireAuth, async (req, res) => {
 
   const listing = await prisma.listing.findUnique({
     where: { id: listingId },
-    include: { seller: { select: { suspendedAt: true } } },
+    include: {
+      seller: { select: { suspendedAt: true, email: true, emailVerifiedAt: true } },
+    },
   });
   // A suspended seller's listing is treated as if it doesn't exist at all
   // (not a distinct error) - same "hide/exclude them anywhere" reasoning
@@ -620,6 +623,7 @@ listingsRouter.get("/:id", requireAuth, async (req, res) => {
         sellerRatingSummary,
         counts._count.views,
         counts._count.contacts,
+        isUserVerified(listing.seller),
       ),
     },
   };
@@ -824,13 +828,14 @@ listingsRouter.post("/:id/reserve", requireAuth, async (req, res) => {
     if (PAYMENT_MODE === "contact_only") {
       const seller = await prisma.user.findUniqueOrThrow({
         where: { id: sellerId },
-        select: { name: true, phone: true, hasWhatsapp: true },
+        select: { name: true, phone: true, hasWhatsapp: true, email: true, emailVerifiedAt: true },
       });
       contact = {
         name: seller.name,
         phone: seller.phone,
         hasWhatsapp: seller.hasWhatsapp,
         ratingSummary: await getRatingSummary(sellerId),
+        isVerified: isUserVerified(seller),
       };
       // One row per (listing, buyer) - recorded right here, not on every
       // /:id/reserve call, since this is the one point that actually

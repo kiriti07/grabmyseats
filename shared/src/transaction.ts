@@ -67,6 +67,12 @@ export interface TransactionContact {
   // the buyer's contact, since buyers aren't rated in this one-directional
   // system. See RatingSummary in ./rating.ts.
   ratingSummary: RatingSummary | null;
+  // This contact's verification status (see isVerified on User in
+  // ./user.ts) - embedded without exposing their id, same as ratingSummary
+  // above. Unlike ratingSummary, meaningful for either party (buyer or
+  // seller), since email verification isn't one-directional the way
+  // ratings are.
+  isVerified: boolean;
 }
 
 // GET /api/transactions/:id/email-forward response: the buyer's view of the

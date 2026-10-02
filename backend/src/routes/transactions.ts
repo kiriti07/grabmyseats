@@ -17,7 +17,7 @@ import { requireEscrowMode } from "../middleware/paymentMode";
 import { payoutProvider } from "../lib/payments";
 import { storageProvider } from "../lib/storage";
 import { PAYMENT_MODE } from "../lib/config";
-import { toSharedTransaction, toSharedRating } from "../lib/serialize";
+import { isUserVerified, toSharedTransaction, toSharedRating } from "../lib/serialize";
 import { getRatingSummary } from "../lib/ratingSummary";
 import { haversineDistanceMeters } from "../lib/geo/haversine";
 import { uploadEmailForward } from "../middleware/upload";
@@ -702,6 +702,7 @@ transactionsRouter.get("/:id/contact", requireAuth, async (req, res) => {
           phone: otherParty.phone,
           hasWhatsapp: otherParty.hasWhatsapp,
           ratingSummary,
+          isVerified: isUserVerified(otherParty),
         },
       },
     };

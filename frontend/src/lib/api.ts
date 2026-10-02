@@ -306,6 +306,21 @@ export function fetchProfile(): Promise<{ user: User }> {
   return request("/api/users/me/profile");
 }
 
+// Triggers the verification email for the current email on file - see
+// POST /api/users/me/email/send-verification. 409s if already verified,
+// 400s if there's no email on file.
+export function sendEmailVerification(): Promise<{ message: string }> {
+  return request("/api/users/me/email/send-verification", { method: "POST" });
+}
+
+// Consumes the single-use token from the link that email contains - see
+// GET /api/users/me/email/verify. Deliberately not authenticated on the
+// backend (the token itself identifies the user), so this works whether or
+// not the browser that opens /verify-email has an active session.
+export function verifyEmail(token: string): Promise<{ user: User }> {
+  return request(`/api/users/me/email/verify?token=${encodeURIComponent(token)}`);
+}
+
 // Full replace, not a partial merge - the edit form always submits the
 // whole profile (see UpdateProfileInput). profileFile is optional and only
 // changes profileImageUrl when actually attached - see the backend route.

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
 import { RatingSummaryBadge } from "@/components/ui/RatingSummaryBadge";
+import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
 import { WhatsAppButton } from "@/components/ui/WhatsAppButton";
 import { ReportUserButton } from "@/components/report/ReportUserButton";
 import { formatShowtimeFull } from "@/lib/format";
@@ -118,8 +119,9 @@ function ListingDetailContent() {
               <CategoryBadge category={listing.category} />
             </div>
             <p className="mt-1 text-muted">{listing.theaterName}</p>
-            <p className="mt-1 flex items-center gap-1 text-sm text-muted">
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-muted">
               Seller: <RatingSummaryBadge summary={listing.sellerRatingSummary} />
+              {listing.sellerIsVerified && <VerifiedBadge />}
             </p>
             <p className="mt-1 text-xs text-muted">
               {listing.viewCount} view{listing.viewCount === 1 ? "" : "s"} ·{" "}
@@ -222,7 +224,10 @@ function ContactReveal({
           Contact the seller directly to arrange payment and pickup.
         </p>
         <div className="mt-4 rounded-lg border border-line bg-surface-raised p-4">
-          <p className="text-sm font-medium text-foreground">{contact.name ?? "The seller"}</p>
+          <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-foreground">
+            {contact.name ?? "The seller"}
+            {contact.isVerified && <VerifiedBadge />}
+          </p>
           {contact.ratingSummary && (
             <RatingSummaryBadge summary={contact.ratingSummary} className="mt-0.5 block" />
           )}

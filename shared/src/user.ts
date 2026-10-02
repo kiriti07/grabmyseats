@@ -19,6 +19,16 @@ export interface User {
   // ./transaction.ts) alongside phone, so it's meaningless without phone
   // and never exposed on its own.
   hasWhatsapp: boolean;
+  // Derived (backend/src/lib/serialize.ts's isUserVerified), not a stored
+  // column - true once email is both set and verified via POST
+  // /api/users/me/email/send-verification -> GET
+  // /api/users/me/email/verify. Phone itself doesn't get a separate flag:
+  // it's implicitly confirmed for any logged-in user (OTP-verified at
+  // login). Powers the "Verified" badge on /account; the seller/contact
+  // equivalent for a user viewed through a listing or transaction is
+  // ListingDetail.sellerIsVerified / TransactionContact.isVerified below,
+  // not this field (neither of those embeds a full User).
+  isVerified: boolean;
 }
 
 // PATCH /api/users/me/profile request body (sent as multipart/form-data so
