@@ -34,14 +34,15 @@ export interface CreateStaffResult {
   temporaryPassword: string;
 }
 
-// GET /api/admin/users lookup result (phone search, for the
+// GET /api/admin/users lookup result (exact phone or email search, for the
 // suspend/unsuspend workflow) - unlike the customer-facing User shape in
 // ./user.ts, this deliberately exposes suspendedAt/suspensionReason since
 // it's what the admin dashboard's suspend action needs to decide which
 // button to show and to display an existing reason.
 export interface AdminUserSummary {
   id: string;
-  phone: string;
+  phone: string | null;
+  email: string | null;
   name: string | null;
   fullName: string | null;
   suspendedAt: string | null;

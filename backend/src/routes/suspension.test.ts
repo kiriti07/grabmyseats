@@ -6,6 +6,7 @@ import { app } from "../app";
 import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
 import { issueOtp } from "../lib/otpStore";
+import { loginOtpIdentifier } from "../lib/emailIdentity";
 
 // End-to-end coverage for suspension enforcement, against the real local
 // Postgres through the actual Express app - not mocked: requireAuth
@@ -18,7 +19,7 @@ describe("suspension", () => {
 
   let sellerId: string;
   let sellerToken: string;
-  let sellerPhone: string;
+  let sellerEmail: string;
   let buyerId: string;
   let buyerToken: string;
   let listingId: string;
@@ -26,14 +27,14 @@ describe("suspension", () => {
 
   beforeAll(async () => {
     const suffix = randomUUID();
-    // The seller's phone has to satisfy POST /api/auth/otp/verify's own
-    // PHONE_RE (digits only) for the login-rejection test below to reach
-    // the suspension check at all, rather than 400ing on format first -
-    // unlike every other test's UUID-suffixed phone (fine everywhere else,
-    // since nothing else here calls the real OTP endpoint with it).
+    // The seller's email is verified so the login-rejection test below
+    // reaches this account (only a verified email logs in - see
+    // lib/emailIdentity.ts) and hits the suspension check.
     const seller = await prisma.user.create({
       data: {
-        phone: `+1${Math.floor(1_000_000_000 + Math.random() * 9_000_000_000)}`,
+        phone: `+1555suspseller${suffix}`.slice(0, 30),
+        email: `susp-seller-${suffix}@example.com`,
+        emailVerifiedAt: new Date(),
         name: "Suspended Seller",
       },
     });
@@ -42,7 +43,7 @@ describe("suspension", () => {
     });
     sellerId = seller.id;
     sellerToken = await issueSessionToken(seller);
-    sellerPhone = seller.phone;
+    sellerEmail = seller.email!;
     buyerId = buyer.id;
     buyerToken = await issueSessionToken(buyer);
 
@@ -109,8 +110,8 @@ describe("suspension", () => {
   });
 
   it("login (OTP verify) refuses a suspended user", async () => {
-    const code = await issueOtp(sellerPhone);
-    const res = await request(app).post("/api/auth/otp/verify").send({ phone: sellerPhone, code });
+    const code = await issueOtp(loginOtpIdentifier(sellerEmail));
+    const res = await request(app).post("/api/auth/otp/verify").send({ email: sellerEmail, code });
     expect(res.status).toBe(403);
     expect(res.body.error).toContain("suspended");
   });

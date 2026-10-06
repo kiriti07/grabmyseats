@@ -18,6 +18,8 @@ function safeNextPath(next: string | null): string {
   return "/";
 }
 
+const PHONE_RE = /^\+[1-9]\d{7,14}$/;
+
 // The one-time "who are you" step shown only right after a brand-new
 // signup (POST /api/auth/otp/verify's isNewAccount: true - see
 // /login/verify/page.tsx, the only place that ever links here). A
@@ -30,7 +32,10 @@ function WelcomeForm() {
   const next = safeNextPath(useSearchParams().get("next"));
 
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  // Optional here, but required before selling (POST /api/listings) - and
+  // never verified, so it's labelled as such wherever it's shown.
+  const [phone, setPhone] = useState("");
+  const [hasWhatsapp, setHasWhatsapp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -58,12 +63,17 @@ function WelcomeForm() {
       setError("Enter your name");
       return;
     }
+    const trimmedPhone = phone.replace(/[\s-]/g, "");
+    if (trimmedPhone && !PHONE_RE.test(trimmedPhone)) {
+      setError("Enter your phone number with country code, e.g. +919876543210");
+      return;
+    }
 
     setIsSubmitting(true);
     try {
       const { user: updated } = await completeProfile({
         name: trimmedName,
-        email: email.trim() || undefined,
+        ...(trimmedPhone ? { phone: trimmedPhone, hasWhatsapp } : {}),
       });
       updateUser(updated);
       router.replace(next);
@@ -89,18 +99,33 @@ function WelcomeForm() {
           className={`${INPUT_CLASS} text-lg`}
         />
 
-        <label htmlFor="email" className="mb-2 mt-4 block text-sm font-medium text-foreground">
-          Email <span className="font-normal text-muted">(optional)</span>
+        <label htmlFor="phone" className="mb-2 mt-4 block text-sm font-medium text-foreground">
+          Phone number <span className="font-normal text-muted">(required to sell tickets)</span>
         </label>
         <input
-          id="email"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="priya@example.com"
+          id="phone"
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="+919876543210"
           className={`${INPUT_CLASS} text-lg`}
         />
+        <p className="mt-1 text-xs text-muted">
+          Shown to buyers so they can reach you, marked as unverified. You can add it later.
+        </p>
+        {phone.trim() && (
+          <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={hasWhatsapp}
+              onChange={(e) => setHasWhatsapp(e.target.checked)}
+              className="h-4 w-4 rounded border-line accent-gold"
+            />
+            This number has WhatsApp
+          </label>
+        )}
 
         <ErrorText>{error}</ErrorText>
 

@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { ApiError, requestOtp } from "@/lib/api";
 
-const PHONE_RE = /^\+[1-9]\d{7,14}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function LoginForm() {
-  const [phone, setPhone] = useState("+91");
+  const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
@@ -32,16 +32,16 @@ function LoginForm() {
     e.preventDefault();
     setError(null);
 
-    const trimmed = phone.trim();
-    if (!PHONE_RE.test(trimmed)) {
-      setError("Enter a valid phone number with country code, e.g. +919876543210");
+    const trimmed = email.trim().toLowerCase();
+    if (!EMAIL_RE.test(trimmed)) {
+      setError("Enter a valid email address");
       return;
     }
 
     setIsLoading(true);
     try {
       await requestOtp(trimmed);
-      const params = new URLSearchParams({ phone: trimmed });
+      const params = new URLSearchParams({ email: trimmed });
       if (next) params.set("next", next);
       if (ref) params.set("ref", ref);
       router.push(`/login/verify?${params.toString()}`);
@@ -54,20 +54,21 @@ function LoginForm() {
   return (
     <AuthShell
       title="Sign in"
-      subtitle="Enter your phone number and we'll text you a code"
+      subtitle="Enter your email and we'll send you a 6-digit code"
     >
       <form onSubmit={handleSubmit} noValidate>
-        <label htmlFor="phone" className="mb-2 block text-sm font-medium text-foreground">
-          Phone number
+        <label htmlFor="email" className="mb-2 block text-sm font-medium text-foreground">
+          Email
         </label>
         <input
-          id="phone"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          placeholder="+919876543210"
+          id="email"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          autoCapitalize="none"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
           className="w-full rounded-lg border border-line bg-surface px-4 py-3.5 font-sans text-lg text-foreground placeholder:text-muted focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
         />
         <ErrorText>{error}</ErrorText>

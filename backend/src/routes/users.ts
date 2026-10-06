@@ -15,13 +15,27 @@ import { getSellerDeliveryEligibility } from "../lib/sellerTrust";
 import { getRatingSummary } from "../lib/ratingSummary";
 import { getReferralSummary } from "../lib/referral";
 import { toSharedUser } from "../lib/serialize";
-import { isValidEmail } from "../lib/validators";
+import { normalizeLoginEmail, PHONE_RE } from "../lib/validators";
 import { APP_URL } from "../lib/config";
-import { emailProvider } from "../lib/email";
+import { emailProvider, sendOtpEmail } from "../lib/email";
 import {
   consumeEmailVerificationToken,
   issueEmailVerificationToken,
 } from "../lib/emailVerificationStore";
+import { issueOtp, verifyOtp } from "../lib/otpStore";
+import {
+  claimOtpIdentifier,
+  claimVerifiedEmail,
+  EmailOwnedByAnotherAccountError,
+  isUniqueViolation,
+} from "../lib/emailIdentity";
+import {
+  otpEmailLimiter,
+  otpEmailDailyLimiter,
+  otpIpLimiter,
+  otpGlobalLimiter,
+} from "../middleware/rateLimit";
+import { LIVE_LISTING_STATUSES } from "@grabmyseats/shared";
 
 export const usersRouter = Router();
 
@@ -74,17 +88,29 @@ function requireNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-// Edits the profile fields below - phone is deliberately absent from this
-// endpoint entirely: it's the OTP-verified login identity, and changing it
-// is a separate, more careful flow to design later, not part of this one.
-// Every text field here is a full replace, not a partial merge - the edit
-// form always submits the whole profile, so an omitted/blank optional
-// field means "clear it". profileImageUrl is the one exception: it only
-// changes when a profileImage file is actually attached to this request,
-// same "send only what's changing" shape as PATCH /api/listings/:id.
+// Edits the profile fields below. Every text field here is a full replace,
+// not a partial merge - the edit form always submits the whole profile, so
+// an omitted/blank optional field means "clear it". Two exceptions:
+// profileImageUrl only changes when a profileImage file is actually
+// attached to this request (same "send only what's changing" shape as
+// PATCH /api/listings/:id), and phone only changes when the field is sent
+// at all (omitted = unchanged, blank = clear), so a client built before
+// phone was editable here can't wipe it.
+//
+// A *verified* email is the login identity (lib/emailIdentity.ts) and
+// can't be changed here - that would leave the account with no way to log
+// in until the new address is verified. It goes through POST
+// /me/email/claim/request -> /claim/verify instead, which only switches
+// once the new address is proven. An unverified (or absent) email is still
+// a plain profile field here, verifiable later via POST
+// /me/email/send-verification.
 usersRouter.patch("/me/profile", requireAuth, uploadProfileImage, async (req, res) => {
   const fullName = requireNonEmptyString(req.body?.fullName);
-  const email = requireNonEmptyString(req.body?.email);
+  const emailRaw = requireNonEmptyString(req.body?.email);
+  const email = emailRaw ? normalizeLoginEmail(emailRaw) : null;
+  // undefined = not sent (leave unchanged); null = sent blank (clear).
+  const phone =
+    req.body?.phone === undefined ? undefined : requireNonEmptyString(req.body.phone);
   const dateOfBirthRaw = requireNonEmptyString(req.body?.dateOfBirth);
   const gender = requireNonEmptyString(req.body?.gender);
   const address = requireNonEmptyString(req.body?.address);
@@ -96,7 +122,10 @@ usersRouter.patch("/me/profile", requireAuth, uploadProfileImage, async (req, re
 
   const errors: string[] = [];
   if (!fullName) errors.push("fullName is required");
-  if (email && !isValidEmail(email)) errors.push("email must be a valid email address");
+  if (emailRaw && !email) errors.push("email must be a valid email address");
+  if (phone && !PHONE_RE.test(phone)) {
+    errors.push("phone must include the country code, e.g. +919876543210");
+  }
 
   let dateOfBirth: Date | null = null;
   if (dateOfBirthRaw) {
@@ -116,6 +145,51 @@ usersRouter.patch("/me/profile", requireAuth, uploadProfileImage, async (req, re
     return;
   }
 
+  const currentEmail = req.user!.email;
+  const hasVerifiedEmail = currentEmail !== null && req.user!.emailVerifiedAt !== null;
+  // Omitted/blank leaves a verified email as-is (it can't be cleared -
+  // it's how this account logs in); only a *different* address is refused.
+  if (hasVerifiedEmail && email !== null && email !== currentEmail.toLowerCase()) {
+    const body: ApiResponse<never> = {
+      success: false,
+      error: "Your sign-in email can only be changed by confirming the new address",
+    };
+    res.status(409).json(body);
+    return;
+  }
+
+  if (phone !== undefined && phone !== req.user!.phone) {
+    if (phone === null) {
+      // Phone is required to sell (POST /api/listings) - and it's what a
+      // buyer is handed at contact reveal - so it can't be removed out
+      // from under a live listing.
+      const liveListings = await prisma.listing.count({
+        where: { sellerId: req.user!.id, status: { in: LIVE_LISTING_STATUSES } },
+      });
+      if (liveListings > 0) {
+        const body: ApiResponse<never> = {
+          success: false,
+          error: "You need a phone number while you have live listings",
+        };
+        res.status(400).json(body);
+        return;
+      }
+    } else {
+      const holder = await prisma.user.findFirst({
+        where: { phone, id: { not: req.user!.id } },
+        select: { id: true },
+      });
+      if (holder) {
+        const body: ApiResponse<never> = {
+          success: false,
+          error: "That phone number is already in use by another account",
+        };
+        res.status(409).json(body);
+        return;
+      }
+    }
+  }
+
   let profileImageUrl: string | undefined;
   if (req.file) {
     const filename = `${req.user!.id}-${randomUUID()}`;
@@ -130,20 +204,21 @@ usersRouter.patch("/me/profile", requireAuth, uploadProfileImage, async (req, re
       where: { id: req.user!.id },
       data: {
         fullName,
-        email,
         dateOfBirth,
         gender,
         address,
         hasWhatsapp,
+        ...(phone !== undefined ? { phone } : {}),
         ...(profileImageUrl ? { profileImageUrl } : {}),
-        // email is a full replace (see the comment above) - whenever it
-        // actually changes (including clearing it to null), any prior
-        // verification no longer applies to whatever's on file now, so
-        // this must be re-verified via POST /me/email/send-verification.
-        // Left untouched when the submitted email matches what's already
-        // on file, so a no-op PATCH never un-verifies an already-verified
-        // address.
-        ...(email !== req.user!.email ? { emailVerifiedAt: null } : {}),
+        // A verified email was already checked above to be unchanged, and
+        // is left exactly as stored. Otherwise email is a full replace
+        // (see the comment above) - whenever it actually changes
+        // (including clearing it to null), any prior verification no
+        // longer applies to whatever's on file now, so this must be
+        // re-verified via POST /me/email/send-verification.
+        ...(hasVerifiedEmail
+          ? {}
+          : { email, ...(email !== currentEmail ? { emailVerifiedAt: null } : {}) }),
       },
     });
 
@@ -153,14 +228,15 @@ usersRouter.patch("/me/profile", requireAuth, uploadProfileImage, async (req, re
     };
     res.json(body);
   } catch (err) {
-    // Unique constraint violation on email (Prisma error code P2002) -
-    // checked structurally rather than importing PrismaClientKnownRequestError,
+    // Unique constraint violation on email (or, in a race past the
+    // pre-check above, phone) - Prisma error code P2002, checked
+    // structurally rather than importing PrismaClientKnownRequestError,
     // matching the loose Prisma-error handling already used elsewhere in
     // this codebase (see the theaterLocation catch in POST /api/listings).
-    if (err && typeof err === "object" && "code" in err && err.code === "P2002") {
+    if (isUniqueViolation(err)) {
       const body: ApiResponse<never> = {
         success: false,
-        error: "That email is already in use by another account",
+        error: "That email or phone number is already in use by another account",
       };
       res.status(409).json(body);
       return;
@@ -229,14 +305,105 @@ usersRouter.get("/me/email/verify", async (req, res) => {
     return;
   }
 
-  const updated = await prisma.user.update({
-    where: { id: user.id },
-    data: { emailVerifiedAt: new Date() },
-  });
+  // Clicking the link proves ownership, so this goes through the same
+  // claim as login: any other account's unverified claim on the address is
+  // cleared, and it's refused if another account already has it verified.
+  let updated;
+  try {
+    updated = await claimVerifiedEmail(user.id, user.email);
+  } catch (err) {
+    if (err instanceof EmailOwnedByAnotherAccountError || isUniqueViolation(err)) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: "That email is already the sign-in email for another account",
+      };
+      res.status(409).json(body);
+      return;
+    }
+    throw err;
+  }
 
   const body: ApiResponse<{ user: SharedUser }> = {
     success: true,
     data: { user: toSharedUser(updated) },
   };
   res.json(body);
+});
+
+const CLAIM_CODE_RE = /^\d{6}$/;
+
+// Step 1 of making an address this account's verified login identity -
+// used by the "add an email to keep access" banner (accounts with no
+// verified email) and by "Change email" on the profile page. Nothing is
+// written to the account until /claim/verify below proves ownership.
+// Same mail-relay protections as POST /api/auth/otp/request (layered rate
+// limits, fixed message body, send not awaited), and the same response
+// whatever the address - whether some other account holds it is only
+// revealed once the caller has proven they own it.
+usersRouter.post(
+  "/me/email/claim/request",
+  requireAuth,
+  otpEmailLimiter,
+  otpEmailDailyLimiter,
+  otpIpLimiter,
+  otpGlobalLimiter,
+  async (req, res) => {
+    const email = normalizeLoginEmail(req.body?.email);
+    if (!email) {
+      const body: ApiResponse<never> = { success: false, error: "Enter a valid email address" };
+      res.status(400).json(body);
+      return;
+    }
+
+    const code = await issueOtp(claimOtpIdentifier(req.user!.id, email));
+    sendOtpEmail(email, code).catch((err) => {
+      console.error("[users] failed to send add-email code", err);
+    });
+
+    const body: ApiResponse<{ message: string }> = {
+      success: true,
+      data: { message: "If that address can receive email, a code is on its way" },
+    };
+    res.json(body);
+  },
+);
+
+// Step 2: the code proves ownership, so the address becomes this account's
+// verified email - replacing whatever email it had - and any other
+// account's unverified claim on it is cleared (lib/emailIdentity.ts's
+// claimVerifiedEmail). Refused if a different account already has it
+// verified: that's an existing login identity, not something to take over.
+usersRouter.post("/me/email/claim/verify", requireAuth, async (req, res) => {
+  const email = normalizeLoginEmail(req.body?.email);
+  const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+  if (!email || !CLAIM_CODE_RE.test(code)) {
+    const body: ApiResponse<never> = { success: false, error: "email and code are required" };
+    res.status(400).json(body);
+    return;
+  }
+
+  if (!(await verifyOtp(claimOtpIdentifier(req.user!.id, email), code))) {
+    const body: ApiResponse<never> = { success: false, error: "Invalid or expired code" };
+    res.status(401).json(body);
+    return;
+  }
+
+  try {
+    const updated = await claimVerifiedEmail(req.user!.id, email);
+    const body: ApiResponse<{ user: SharedUser }> = {
+      success: true,
+      data: { user: toSharedUser(updated) },
+    };
+    res.json(body);
+  } catch (err) {
+    if (err instanceof EmailOwnedByAnotherAccountError || isUniqueViolation(err)) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: "That email is already the sign-in email for another account",
+      };
+      res.status(409).json(body);
+      return;
+    }
+    throw err;
+  }
 });

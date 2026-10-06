@@ -33,7 +33,7 @@ describe("matchAlerts", () => {
     });
     sellerId = seller.id;
     buyerId = buyer.id;
-    buyerPhone = buyer.phone;
+    buyerPhone = buyer.phone!;
   });
 
   afterAll(async () => {

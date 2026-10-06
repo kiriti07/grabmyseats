@@ -42,7 +42,7 @@ describe("PAYMENT_MODE=contact_only", () => {
     sellerId = seller.id;
     sellerToken = await issueSessionToken(seller);
     sellerName = seller.name!;
-    sellerPhone = seller.phone;
+    sellerPhone = seller.phone!;
     buyerId = buyer.id;
     buyerToken = await issueSessionToken(buyer);
 

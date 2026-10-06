@@ -15,7 +15,7 @@ import { ErrorText } from "@/components/ui/ErrorText";
 import { RatingSummaryBadge } from "@/components/ui/RatingSummaryBadge";
 import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
 import { ReportUserButton } from "@/components/report/ReportUserButton";
-import { WhatsAppButton } from "@/components/ui/WhatsAppButton";
+import { ContactPhone } from "@/components/ui/ContactPhone";
 import { formatShowtimeFull, formatTimeOnly } from "@/lib/format";
 import { getCheckInWindow } from "@/lib/checkInWindow";
 import { CONTACT_ONLY_DISCLAIMER } from "@/lib/paymentMode";
@@ -535,13 +535,11 @@ function ContactOnlyDetail({
               {contact.ratingSummary && (
                 <RatingSummaryBadge summary={contact.ratingSummary} className="mt-0.5 block" />
               )}
-              <a
-                href={`tel:${contact.phone}`}
-                className="mt-1 block font-display text-lg tracking-wide text-gold hover:text-gold-dim"
-              >
-                {contact.phone}
-              </a>
-              {contact.hasWhatsapp && <WhatsAppButton phone={contact.phone} />}
+              <ContactPhone
+                phone={contact.phone}
+                hasWhatsapp={contact.hasWhatsapp}
+                linkClassName="font-display text-lg tracking-wide text-gold hover:text-gold-dim"
+              />
             </>
           ) : contactError ? (
             <p className="text-sm text-error">{contactError}</p>
@@ -550,9 +548,7 @@ function ContactOnlyDetail({
           )}
         </div>
 
-        {contact && (
-          <ReportUserButton reportedPhone={contact.phone} relatedTransactionId={transactionId} />
-        )}
+        {contact && <ReportUserButton relatedTransactionId={transactionId} />}
       </div>
 
       {detail.party === "buyer" && (
@@ -769,11 +765,12 @@ function ContactSection({
           {contact.ratingSummary && (
             <RatingSummaryBadge summary={contact.ratingSummary} className="mt-0.5 block" />
           )}
-          <a href={`tel:${contact.phone}`} className="text-gold hover:text-gold-dim">
-            {contact.phone}
-          </a>
-          {contact.hasWhatsapp && <WhatsAppButton phone={contact.phone} />}
-          <ReportUserButton reportedPhone={contact.phone} relatedTransactionId={transactionId} />
+          <ContactPhone
+            phone={contact.phone}
+            hasWhatsapp={contact.hasWhatsapp}
+            linkClassName="text-gold hover:text-gold-dim"
+          />
+          <ReportUserButton relatedTransactionId={transactionId} />
         </div>
       )}
       {!contact && contactError && <p className="mt-2 text-sm text-muted">{contactError}</p>}

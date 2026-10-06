@@ -20,6 +20,7 @@ import { DELIVERY_METHOD_DESCRIPTION, DELIVERY_METHOD_LABEL } from "@/lib/delive
 import { CATEGORY_LABEL, titleFieldLabel, venueFieldLabel } from "@/lib/category";
 import { ApiError, createListing, fetchDeliveryEligibility, geocodeVenue, runOcr } from "@/lib/api";
 import { getVenuePickerCityCenter } from "@/lib/venuePickerCityCenters";
+import { useAuth } from "@/context/AuthContext";
 
 const ALL_CATEGORIES: Category[] = ["MOVIE", "EVENT", "SPORT"];
 
@@ -46,6 +47,7 @@ type AutoFillableField =
   | "bookingId";
 
 export default function SellPage() {
+  const { user } = useAuth();
   const [category, setCategory] = useState<Category>("MOVIE");
   const [movieName, setMovieName] = useState("");
   const [theaterName, setTheaterName] = useState("");
@@ -278,6 +280,31 @@ export default function SellPage() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  // Buyers are handed the seller's phone at contact reveal, so POST
+  // /api/listings refuses a seller without one - caught here first rather
+  // than after they've filled in the whole form.
+  if (user && !user.phone) {
+    return (
+      <main className="flex min-h-dvh flex-col items-center bg-background px-5 py-6">
+        <div className="mt-10 w-full max-w-sm rounded-2xl border border-line bg-surface p-6 text-center">
+          <p className="font-display text-2xl tracking-wide text-foreground">
+            Add a phone number to sell
+          </p>
+          <p className="mt-2 text-sm text-muted">
+            Buyers use it to reach you about their tickets. It&apos;s shown to them marked as
+            unverified.
+          </p>
+          <Link
+            href="/account/profile"
+            className="mt-6 inline-block text-sm font-medium text-gold hover:text-gold-dim"
+          >
+            Add phone number →
+          </Link>
+        </div>
+      </main>
+    );
   }
 
   if (createdListing) {

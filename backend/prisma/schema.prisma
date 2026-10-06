@@ -23,7 +23,11 @@ datasource db {
 
 model User {
   id                String        @id @default(cuid())
-  phone             String        @unique
+  // Self-reported and unverified - email (below, once verified) is the
+  // login identity. Nullable: accounts created by email-OTP login have
+  // none until they add one, which they must before selling (POST
+  // /api/listings). Still unique - Postgres allows any number of NULLs.
+  phone             String?       @unique
   name              String?
   trustScore        Int           @default(100)
   strikes           Int           @default(0)
@@ -38,10 +42,10 @@ model User {
   listingViews      ListingView[]
   listingContacts   ListingContact[]
 
-  // Profile fields - see GET/PATCH /api/users/me/profile. phone is
-  // deliberately not editable through that endpoint; it's the
-  // OTP-verified login identity, and changing it is a separate, more
-  // careful flow to design later. All nullable (including fullName) since
+  // Profile fields - see GET/PATCH /api/users/me/profile. email is the
+  // login identity once verified (emailVerifiedAt set) and unverified
+  // emails never log anyone in - see src/lib/emailIdentity.ts. All
+  // nullable (including fullName) since
   // existing users have none of this until they fill out their profile -
   // fullName being "required" is a form-level rule on the PATCH endpoint,
   // not a DB constraint.
@@ -58,15 +62,16 @@ model User {
   // tel: link. Self-reported, not verified.
   hasWhatsapp     Boolean   @default(false)
 
-  // Set by GET /api/users/me/email/verify once the user completes the
-  // POST /api/users/me/email/send-verification link flow for their
-  // *current* email - see lib/emailVerificationStore.ts. Cleared back to
-  // null by PATCH /api/users/me/profile whenever email is changed (to a
-  // new value, or to no email at all), so this can never point at an
-  // address the user no longer has on file. isVerified (toSharedUser)
-  // derives straight from this plus email being non-null - phone is
-  // already OTP-verified for any logged-in user, so there's no separate
-  // "phone verified" flag to track.
+  // Set whenever the user proves they own their *current* email: email-OTP
+  // login (POST /api/auth/otp/verify), the add/change-email code (POST
+  // /api/users/me/email/claim/verify), or the link flow (POST
+  // /api/users/me/email/send-verification -> GET /api/users/me/email/verify).
+  // Non-null makes email this account's login identity. Cleared back to
+  // null by PATCH /api/users/me/profile whenever an *unverified* email is
+  // changed (a verified one can't be changed there), so this can never
+  // point at an address the user no longer has on file. isVerified
+  // (toSharedUser) derives straight from this plus email being non-null.
+  // Phone has no equivalent flag - it's never verified.
   emailVerifiedAt DateTime?
 
   // Set together by POST /api/admin/users/:id/suspend (or POST

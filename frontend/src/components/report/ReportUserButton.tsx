@@ -13,21 +13,12 @@ const MAX_EVIDENCE_FILES = 5;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
 // "Report user" - reachable from wherever the other party's contact has
-// already been revealed (the transaction detail page's contact section,
-// and the buy page's contact-reveal card), since that's the only place a
-// buyer/seller ever has a phone number to report by - see
-// shared/src/transaction.ts's TransactionContact, which never carries a
-// user id. relatedTransactionId is optional: the contact-reveal card in
-// PAYMENT_MODE=contact_only has one (the reservation that triggered the
-// reveal), but a report could in principle be filed with just a phone
-// number and no transaction context at all.
-export function ReportUserButton({
-  reportedPhone,
-  relatedTransactionId,
-}: {
-  reportedPhone: string;
-  relatedTransactionId?: string;
-}) {
+// already been revealed (the transaction detail page's contact sections,
+// and the buy page's contact-reveal card). Reports against the
+// transaction: the backend checks the reporter is a party to it and works
+// out who the other party is itself - TransactionContact never carries a
+// user id, and its phone is unverified and may be missing entirely.
+export function ReportUserButton({ relatedTransactionId }: { relatedTransactionId: string }) {
   const [isOpen, setIsOpen] = useState(false);
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -58,7 +49,6 @@ export function ReportUserButton({
     setIsSubmitting(true);
     try {
       await createFraudReport({
-        reportedPhone,
         relatedTransactionId,
         description: description.trim(),
         evidence: files,

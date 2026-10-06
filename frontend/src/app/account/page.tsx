@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { ReferralSummary } from "@grabmyseats/shared";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError, fetchMyReferrals, sendEmailVerification } from "@/lib/api";
+import { fetchMyReferrals } from "@/lib/api";
 import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
+import { AddEmailBanner } from "@/components/account/AddEmailBanner";
 
 // A protected route example: src/middleware.ts redirects here-bound
 // requests to /login when there's no session cookie at all. This
@@ -18,8 +19,6 @@ export default function AccountPage() {
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [referralCopyNotice, setReferralCopyNotice] = useState<string | null>(null);
   const [referrals, setReferrals] = useState<ReferralSummary | null>(null);
-  const [isSendingVerification, setIsSendingVerification] = useState(false);
-  const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
   // window.location.origin is only known once mounted in the browser -
   // computed here (not inline at render) so server-rendered and first-
   // client-render markup match, same reasoning as handleShare below only
@@ -47,7 +46,7 @@ export default function AccountPage() {
   // /login's own ?ref= handling) once referral data has loaded; falls
   // back to the plain app link before that, or if it never loads. There's
   // no separate /signup page - /login already handles both new and
-  // returning users via OTP.
+  // returning users via email OTP.
   const referralLink =
     referrals && origin ? `${origin}/login?ref=${referrals.referralCode}` : origin;
 
@@ -85,21 +84,6 @@ export default function AccountPage() {
     }
   }
 
-  async function handleSendVerification() {
-    setVerificationNotice(null);
-    setIsSendingVerification(true);
-    try {
-      await sendEmailVerification();
-      setVerificationNotice("Verification email sent - check your inbox.");
-    } catch (err) {
-      setVerificationNotice(
-        err instanceof ApiError ? err.message : "Couldn't send the verification email.",
-      );
-    } finally {
-      setIsSendingVerification(false);
-    }
-  }
-
   if (isLoading) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background text-muted">
@@ -126,30 +110,19 @@ export default function AccountPage() {
 
       <div className="flex w-full flex-1 flex-col items-center justify-center gap-4 text-center">
         <h1 className="font-display text-3xl tracking-wide text-foreground">Your account</h1>
-        <p className="flex items-center gap-2 text-muted">
-          {user.phone}
-          {user.isVerified && <VerifiedBadge />}
-        </p>
-
-        {user.email && !user.isVerified && (
-          <div className="w-full max-w-xs rounded-lg border border-line bg-surface p-4 text-left">
-            <p className="text-sm font-medium text-foreground">Verify your email</p>
-            <p className="mt-1 text-xs text-muted">
-              Confirm {user.email} to get the Verified badge on your profile and listings.
+        <div className="flex flex-col items-center gap-1 text-muted">
+          {user.isVerified && (
+            <p className="flex items-center gap-2">
+              {user.email}
+              <VerifiedBadge />
             </p>
-            <button
-              type="button"
-              onClick={handleSendVerification}
-              disabled={isSendingVerification}
-              className="mt-3 w-full rounded-lg border border-line px-4 py-2 text-sm font-medium text-foreground hover:border-gold disabled:opacity-60"
-            >
-              {isSendingVerification ? "Sending..." : "Send verification email"}
-            </button>
-            {verificationNotice && (
-              <p className="mt-2 text-xs text-muted">{verificationNotice}</p>
-            )}
-          </div>
-        )}
+          )}
+          {user.phone && <p className="text-sm">{user.phone}</p>}
+        </div>
+
+        {/* No verified email = no way to sign back in once this session
+            ends (only a verified email is a login identity). */}
+        {!user.isVerified && <AddEmailBanner user={user} />}
 
         <div className="flex w-full max-w-xs flex-col gap-2">
           <Link

@@ -24,9 +24,11 @@ import type {
 } from "@grabmyseats/shared";
 import { PAYMENT_MODE } from "./config";
 
-// true when the user has a confirmed email on file - phone itself is
-// implicitly confirmed for any logged-in user (OTP-verified at login), so
-// that's not a separate condition here. Checks email is non-null (not just
+// true when the user has a confirmed email on file - which, since email
+// OTP is the login method, is every account created or logged into since
+// then (see POST /api/auth/otp/verify). Phone is never verified (it's
+// self-reported - see TransactionContact.phone), so it's not a condition
+// here. Checks email is non-null (not just
 // emailVerifiedAt) purely for clarity/defense-in-depth: PATCH
 // /api/users/me/profile already clears emailVerifiedAt whenever email
 // changes to anything else, including clearing it to null, so in practice
@@ -245,13 +247,14 @@ export function toSharedAdminUser(admin: PrismaAdminUser): SharedAdminUser {
   };
 }
 
-// GET /api/admin/users (phone lookup) response shape - see the comment on
+// GET /api/admin/users (phone or email lookup) response shape - see the comment on
 // AdminUserSummary in shared/src/admin.ts for why this exposes
 // suspension fields that toSharedUser (customer-facing) doesn't.
 export function toAdminUserSummary(user: PrismaUser): AdminUserSummary {
   return {
     id: user.id,
     phone: user.phone,
+    email: user.email,
     name: user.name,
     fullName: user.fullName,
     suspendedAt: user.suspendedAt?.toISOString() ?? null,

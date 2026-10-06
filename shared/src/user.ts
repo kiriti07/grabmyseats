@@ -1,13 +1,17 @@
 export interface User {
   id: string;
-  phone: string;
+  // Self-reported and never verified (there's no phone verification - SMS
+  // OTP isn't wired up), so it's always shown as "Unverified" wherever it's
+  // revealed. null until the user adds one; required before selling (POST
+  // /api/listings).
+  phone: string | null;
   name: string | null;
   trustScore: number;
   strikes: number;
   createdAt: string;
-  // Profile fields - see GET/PATCH /api/users/me/profile. phone above is
-  // the OTP-verified login identity and isn't editable through that
-  // endpoint.
+  // Profile fields - see GET/PATCH /api/users/me/profile. email doubles as
+  // the login identity once verified (isVerified below) - see
+  // backend/src/lib/emailIdentity.ts.
   profileImageUrl: string | null;
   email: string | null;
   fullName: string | null;
@@ -20,11 +24,12 @@ export interface User {
   // and never exposed on its own.
   hasWhatsapp: boolean;
   // Derived (backend/src/lib/serialize.ts's isUserVerified), not a stored
-  // column - true once email is both set and verified via POST
-  // /api/users/me/email/send-verification -> GET
-  // /api/users/me/email/verify. Phone itself doesn't get a separate flag:
-  // it's implicitly confirmed for any logged-in user (OTP-verified at
-  // login). Powers the "Verified" badge on /account; the seller/contact
+  // column - true once email is both set and verified: by email-OTP login,
+  // by POST /api/users/me/email/claim/verify, or by the
+  // send-verification -> GET /api/users/me/email/verify link. Phone never
+  // counts toward this (it's unverified). false means this account has no
+  // working login identity yet - see the "add an email" banner on
+  // /account. Powers the "Verified" badge on /account; the seller/contact
   // equivalent for a user viewed through a listing or transaction is
   // ListingDetail.sellerIsVerified / TransactionContact.isVerified below,
   // not this field (neither of those embeds a full User).
@@ -42,7 +47,13 @@ export interface User {
 // unchanged" case the way the text fields have).
 export interface UpdateProfileInput {
   fullName: string;
+  // Ignored when unchanged; a *verified* email can't be changed here (409)
+  // - that goes through the claim flow instead (see the frontend's
+  // requestEmailClaimCode/verifyEmailClaimCode).
   email?: string;
+  // Omitted = unchanged, "" = clear (refused while the user has live
+  // listings). E.164.
+  phone?: string;
   dateOfBirth?: string;
   gender?: string;
   address?: string;
@@ -64,13 +75,16 @@ export interface SellerDeliveryEligibility {
 
 // POST /api/auth/complete-profile request body - the one-time "who are
 // you" step shown right after a brand-new signup (see isNewAccount on the
-// POST /api/auth/otp/verify response). Sets User.name/email directly -
+// POST /api/auth/otp/verify response). Sets User.name/phone directly -
 // deliberately not UpdateProfileInput's fullName/dateOfBirth/etc, which
 // are a separate, later-in-the-relationship set of fields edited via
-// PATCH /api/users/me/profile.
+// PATCH /api/users/me/profile. Email isn't here: it's already the
+// verified login identity. phone is optional at signup but required to
+// sell; hasWhatsapp only applies when phone is given.
 export interface CompleteProfileInput {
   name: string;
-  email?: string;
+  phone?: string;
+  hasWhatsapp?: boolean;
 }
 
 // GET /api/users/me/referrals response - see backend/src/lib/referral.ts.

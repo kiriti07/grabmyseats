@@ -105,8 +105,11 @@ export function fetchAdminMetrics(): Promise<AdminMetrics> {
 
 // Everything below is reachable by both ADMIN and SUPPORT.
 
-export function lookupUserByPhone(phone: string): Promise<{ user: AdminUserSummary | null }> {
-  return adminRequest(`/api/admin/users?phone=${encodeURIComponent(phone)}`);
+// Exact match on phone or email - see GET /api/admin/users.
+export function lookupUser(
+  by: { phone: string } | { email: string },
+): Promise<{ user: AdminUserSummary | null }> {
+  return adminRequest(`/api/admin/users?${new URLSearchParams(by).toString()}`);
 }
 
 export function suspendUser(id: string, reason: string): Promise<{ user: AdminUserSummary }> {

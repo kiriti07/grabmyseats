@@ -11,7 +11,7 @@ import { issueSessionToken } from "../lib/session";
 // scenario here submits text fields only (no profileImage file attached) -
 // that's a deliberate choice, not a coverage gap: it exercises every
 // validation/business rule (fullName required, email format + uniqueness,
-// dateOfBirth validation, full-replace semantics, phone staying untouched)
+// dateOfBirth validation, full-replace semantics, phone omitted = unchanged)
 // without needing real Cloudinary credentials for the upload branch,
 // matching how the email-forward suite avoids the same dependency
 // elsewhere in this repo's tests.
@@ -95,7 +95,7 @@ describe("GET/PATCH /api/users/me/profile", () => {
     expect(res.status).toBe(409);
   });
 
-  it("updates fullName/email/dateOfBirth/gender/address, and leaves phone untouched", async () => {
+  it("updates fullName/email/dateOfBirth/gender/address, and leaves an unsent phone untouched", async () => {
     const originalPhone = (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).phone;
 
     const res = await request(app)
@@ -112,16 +112,8 @@ describe("GET/PATCH /api/users/me/profile", () => {
     expect(res.body.data.user.gender).toBe("Woman");
     expect(res.body.data.user.address).toBe("123 MG Road, Bengaluru");
     expect(res.body.data.user.dateOfBirth).not.toBeNull();
+    // phone wasn't sent at all, so it's left as-is.
     expect(res.body.data.user.phone).toBe(originalPhone);
-
-    // phone is not accepted as input at all - sending one is simply ignored.
-    const attempted = await request(app)
-      .patch("/api/users/me/profile")
-      .set("Authorization", `Bearer ${userToken}`)
-      .field("fullName", "Priya Sharma")
-      .field("phone", "+19995550000");
-    expect(attempted.status).toBe(200);
-    expect(attempted.body.data.user.phone).toBe(originalPhone);
   });
 
   it("full-replace semantics: omitting an optional field on a later PATCH clears it", async () => {

@@ -9,7 +9,11 @@ import type { User } from "../generated/prisma/client";
 
 export interface SessionPayload extends JWT {
   sub: string;
-  phone: string;
+  email: string | null;
+  // Self-reported and unverified; null for accounts that haven't added one.
+  // Tokens issued before email login carry only phone - nothing reads
+  // either field back (attachUser re-loads the user by sub).
+  phone: string | null;
   name: string | null;
 }
 
@@ -18,7 +22,7 @@ export async function issueSessionToken(user: User): Promise<string> {
     secret: getAuthSecret(),
     salt: SESSION_COOKIE_NAME,
     maxAge: SESSION_MAX_AGE_SECONDS,
-    token: { sub: user.id, phone: user.phone, name: user.name },
+    token: { sub: user.id, email: user.email, phone: user.phone, name: user.name },
   });
 }
 

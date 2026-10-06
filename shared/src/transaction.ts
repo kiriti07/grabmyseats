@@ -54,13 +54,16 @@ export interface Transaction {
 // details, only available within the 30-minute window around showtime (in
 // escrow mode - see PAYMENT_MODE). Also what ReserveResult.contact below
 // carries for the contact-only reserve response - same shape either way.
-// phone is always a tel:-usable E.164 string ("+<countrycode><digits>", no
-// spaces/formatting - enforced at signup, see PHONE_RE in
-// backend/src/routes/auth.ts); hasWhatsapp just tells the frontend whether
-// phone can *also* be turned into a wa.me link.
+// phone, when present, is a tel:-usable E.164 string ("+<countrycode>
+// <digits>", no spaces/formatting - see PHONE_RE in
+// backend/src/lib/validators.ts). It's self-reported and never verified,
+// so the frontend always labels it "Unverified". null when this party
+// hasn't added one - a seller always has one (required to list), a buyer
+// may not. hasWhatsapp just tells the frontend whether phone can *also* be
+// turned into a wa.me link.
 export interface TransactionContact {
   name: string | null;
-  phone: string;
+  phone: string | null;
   hasWhatsapp: boolean;
   // The seller's rating summary, when this contact IS the seller (i.e.
   // the caller is the buyer) - null when the caller is the seller viewing

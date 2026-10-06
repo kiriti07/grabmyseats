@@ -98,6 +98,19 @@ function requireFiniteNumber(value: unknown): number | null {
 }
 
 listingsRouter.post("/", requireAuth, uploadScreenshot, async (req, res) => {
+  // A buyer is handed the seller's phone at contact reveal, so selling
+  // requires one on file - collected (optionally) at signup by POST
+  // /api/auth/complete-profile, or later via PATCH /api/users/me/profile.
+  // It's self-reported and unverified; the buyer sees it labelled as such.
+  if (!req.user!.phone) {
+    const body: ApiResponse<never> = {
+      success: false,
+      error: "Add a phone number to your profile before selling",
+    };
+    res.status(400).json(body);
+    return;
+  }
+
   const category = parseCategory(req.body?.category);
   const movieName = requireNonEmptyString(req.body?.movieName);
   const theaterName = requireNonEmptyString(req.body?.theaterName);

@@ -17,14 +17,22 @@ class ReportedUserNotFoundError extends Error {}
 class CannotReportSelfError extends Error {}
 class TransactionNotFoundError extends Error {}
 class NotPartyToTransactionError extends Error {}
+class ReportedUserMismatchError extends Error {}
 
 // Lets a buyer or seller report another user for suspected fraud - see
 // GET /api/admin/fraud-reports and POST /api/admin/fraud-reports/:id/resolve
-// (routes/admin.ts) for the admin side. reportedUserId or reportedPhone
-// identifies who's being reported: phone is what the contact-reveal and
-// transaction-detail "Report user" entry points actually have on hand
-// (TransactionContact - see shared/src/transaction.ts - never carries a
-// user id), so it's accepted as an equally valid alternative to an id.
+// (routes/admin.ts) for the admin side.
+//
+// Who's being reported:
+// - With relatedTransactionId, it's derived server-side: the reporter must
+//   be the buyer or seller on that transaction, and the reported user is
+//   the *other* party. This is what the contact-reveal and
+//   transaction-detail "Report user" entry points send (TransactionContact
+//   carries no user id, and its phone is unverified and may be absent). A
+//   client-supplied reportedUserId/reportedPhone is never trusted here -
+//   if one is sent anyway it must match the derived party, or the report
+//   is rejected rather than filed against someone else.
+// - Without one, reportedUserId or reportedPhone identifies them directly.
 fraudReportsRouter.post("/", requireAuth, uploadFraudEvidence, async (req, res) => {
   const reportedUserId = requireNonEmptyString(req.body?.reportedUserId);
   const reportedPhone = requireNonEmptyString(req.body?.reportedPhone);
@@ -33,8 +41,8 @@ fraudReportsRouter.post("/", requireAuth, uploadFraudEvidence, async (req, res) 
 
   const errors: string[] = [];
   if (!description) errors.push("description is required");
-  if (!reportedUserId && !reportedPhone) {
-    errors.push("reportedUserId or reportedPhone is required");
+  if (!reportedUserId && !reportedPhone && !relatedTransactionId) {
+    errors.push("relatedTransactionId, reportedUserId or reportedPhone is required");
   }
   if (errors.length > 0) {
     const body: ApiResponse<never> = { success: false, error: errors.join("; ") };
@@ -43,25 +51,33 @@ fraudReportsRouter.post("/", requireAuth, uploadFraudEvidence, async (req, res) 
   }
 
   try {
-    const reportedUser = reportedUserId
-      ? await prisma.user.findUnique({ where: { id: reportedUserId } })
-      : await prisma.user.findUnique({ where: { phone: reportedPhone! } });
-    if (!reportedUser) throw new ReportedUserNotFoundError();
-    if (reportedUser.id === req.user!.id) throw new CannotReportSelfError();
-
-    // Optional, but when given it's validated: never let someone attach an
-    // arbitrary transaction id they had no part in to a report, and never
-    // silently accept a nonexistent one.
+    let reportedUser;
     if (relatedTransactionId) {
+      // Never let someone attach a transaction they had no part in, and
+      // never silently accept a nonexistent one.
       const transaction = await prisma.transaction.findUnique({
         where: { id: relatedTransactionId },
-        include: { listing: true },
+        include: { listing: { include: { seller: true } }, buyer: true },
       });
       if (!transaction) throw new TransactionNotFoundError();
-      const isParty =
-        transaction.buyerId === req.user!.id || transaction.listing.sellerId === req.user!.id;
-      if (!isParty) throw new NotPartyToTransactionError();
+      const isBuyer = transaction.buyerId === req.user!.id;
+      const isSeller = transaction.listing.sellerId === req.user!.id;
+      if (!isBuyer && !isSeller) throw new NotPartyToTransactionError();
+
+      reportedUser = isBuyer ? transaction.listing.seller : transaction.buyer;
+      if (
+        (reportedUserId && reportedUserId !== reportedUser.id) ||
+        (reportedPhone && reportedPhone !== reportedUser.phone)
+      ) {
+        throw new ReportedUserMismatchError();
+      }
+    } else {
+      reportedUser = reportedUserId
+        ? await prisma.user.findUnique({ where: { id: reportedUserId } })
+        : await prisma.user.findUnique({ where: { phone: reportedPhone! } });
+      if (!reportedUser) throw new ReportedUserNotFoundError();
     }
+    if (reportedUser.id === req.user!.id) throw new CannotReportSelfError();
 
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
     const evidenceUrls: string[] = [];
@@ -100,6 +116,14 @@ fraudReportsRouter.post("/", requireAuth, uploadFraudEvidence, async (req, res) 
     }
     if (err instanceof CannotReportSelfError) {
       const body: ApiResponse<never> = { success: false, error: "You can't report yourself" };
+      res.status(400).json(body);
+      return;
+    }
+    if (err instanceof ReportedUserMismatchError) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: "That user isn't the other party on that transaction",
+      };
       res.status(400).json(body);
       return;
     }

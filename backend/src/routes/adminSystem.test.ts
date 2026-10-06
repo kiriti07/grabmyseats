@@ -235,7 +235,7 @@ describe("admin system", () => {
         data: { phone: `+1555admsyslookup${randomUUID()}`.slice(0, 30), name: "Lookup Target" },
       });
       userId = user.id;
-      userPhone = user.phone;
+      userPhone = user.phone!;
     });
 
     afterAll(async () => {

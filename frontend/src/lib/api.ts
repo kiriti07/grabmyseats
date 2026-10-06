@@ -83,21 +83,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return readApiBody<T>(res);
 }
 
-export function requestOtp(phone: string): Promise<{ message: string }> {
+// Emails a 6-digit login code. The response is the same whether or not an
+// account exists for the address - see POST /api/auth/otp/request.
+export function requestOtp(email: string): Promise<{ message: string }> {
   return request("/api/auth/otp/request", {
     method: "POST",
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ email }),
   });
 }
 
 export function verifyOtpCode(
-  phone: string,
+  email: string,
   code: string,
   ref?: string,
 ): Promise<{ user: User; token: string; isNewAccount: boolean }> {
   return request("/api/auth/otp/verify", {
     method: "POST",
-    body: JSON.stringify({ phone, code, ...(ref ? { ref } : {}) }),
+    body: JSON.stringify({ email, code, ...(ref ? { ref } : {}) }),
   });
 }
 
@@ -313,6 +315,25 @@ export function sendEmailVerification(): Promise<{ message: string }> {
   return request("/api/users/me/email/send-verification", { method: "POST" });
 }
 
+// Add (or change) this account's sign-in email: emails a code to `email`,
+// and nothing changes on the account until verifyEmailClaimCode below
+// redeems it - see POST /api/users/me/email/claim/*. Used by the "add an
+// email to keep access" banner on /account and "Change email" on the
+// profile page.
+export function requestEmailClaimCode(email: string): Promise<{ message: string }> {
+  return request("/api/users/me/email/claim/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function verifyEmailClaimCode(email: string, code: string): Promise<{ user: User }> {
+  return request("/api/users/me/email/claim/verify", {
+    method: "POST",
+    body: JSON.stringify({ email, code }),
+  });
+}
+
 // Consumes the single-use token from the link that email contains - see
 // GET /api/users/me/email/verify. Deliberately not authenticated on the
 // backend (the token itself identifies the user), so this works whether or
@@ -331,6 +352,8 @@ export function updateProfile(
   const formData = new FormData();
   formData.append("fullName", data.fullName);
   if (data.email) formData.append("email", data.email);
+  // Omitted = unchanged, "" = clear - see UpdateProfileInput.phone.
+  if (data.phone !== undefined) formData.append("phone", data.phone);
   if (data.dateOfBirth) formData.append("dateOfBirth", data.dateOfBirth);
   if (data.gender) formData.append("gender", data.gender);
   if (data.address) formData.append("address", data.address);
@@ -394,11 +417,12 @@ export function cancelAlert(id: string): Promise<{ alert: TicketAlert }> {
   return request(`/api/alerts/${id}`, { method: "DELETE" });
 }
 
-// Reports another user for suspected fraud. reportedUserId or
-// reportedPhone identifies who's being reported - the contact-reveal and
-// transaction-detail "Report user" entry points only ever have a phone
-// number on hand (see TransactionContact), not a user id, so phone is
-// accepted as an equally valid alternative. evidence files are optional.
+// Reports another user for suspected fraud. With relatedTransactionId (what
+// the contact-reveal and transaction-detail "Report user" entry points
+// send), the backend works out who's being reported - the other party on
+// that transaction - so nothing else is needed. Without one,
+// reportedUserId or reportedPhone identifies them. evidence files are
+// optional.
 export function createFraudReport(data: {
   reportedUserId?: string;
   reportedPhone?: string;

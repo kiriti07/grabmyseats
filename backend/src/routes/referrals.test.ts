@@ -5,6 +5,7 @@ import request from "supertest";
 import { app } from "../app";
 import { prisma } from "../lib/prisma";
 import { issueOtp } from "../lib/otpStore";
+import { loginOtpIdentifier } from "../lib/emailIdentity";
 import { issueSessionToken } from "../lib/session";
 import { REFERRAL_MILESTONE_INTERVAL, REFERRAL_MILESTONE_POINTS } from "../lib/referral";
 
@@ -27,12 +28,8 @@ describe("referrals", () => {
   const userIds: string[] = [];
   const listingIds: string[] = [];
 
-  // POST /api/auth/otp/verify's PHONE_RE is digits-only, unlike every
-  // other test helper's UUID-suffixed phone (fine everywhere else, since
-  // nothing else calls the real OTP endpoint with it) - see
-  // suspension.test.ts's sellerPhone for the same convention.
-  function randomDigitPhone(): string {
-    return `+1${Math.floor(1_000_000_000 + Math.random() * 9_000_000_000)}`;
+  function randomEmail(): string {
+    return `ref-${randomUUID()}@example.com`;
   }
 
   afterAll(async () => {
@@ -47,29 +44,41 @@ describe("referrals", () => {
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   });
 
-  async function createUser(label: string, referralCode?: string, phone?: string) {
+  // verifiedEmail makes the user loggable-in by that address (see
+  // lib/emailIdentity.ts - only a verified email is a login identity).
+  async function createUser(label: string, referralCode?: string, verifiedEmail?: string) {
     const suffix = randomUUID();
     const user = await prisma.user.create({
       data: {
-        phone: phone ?? `+1555ref${label}${suffix}`.slice(0, 30),
+        phone: `+1555ref${label}${suffix}`.slice(0, 30),
         name: `Referral Test ${label}`,
         ...(referralCode ? { referralCode } : {}),
+        ...(verifiedEmail ? { email: verifiedEmail, emailVerifiedAt: new Date() } : {}),
       },
     });
     userIds.push(user.id);
     return { id: user.id, token: await issueSessionToken(user) };
   }
 
-  // Signs up (or logs in, if the phone already has an account) through the
+  // Signs up (or logs in, if the email already has an account) through the
   // real OTP flow - the only path that's allowed to set referredByUserId.
-  async function verifyOtp(phone: string, ref?: string) {
-    const code = await issueOtp(phone);
+  // A brand-new account has no phone, which selling requires (POST
+  // /api/listings), so one is added directly - not what's under test here.
+  async function verifyOtp(email: string, ref?: string) {
+    const code = await issueOtp(loginOtpIdentifier(email));
     const res = await request(app)
       .post("/api/auth/otp/verify")
-      .send({ phone, code, ...(ref ? { ref } : {}) });
+      .send({ email, code, ...(ref ? { ref } : {}) });
     expect(res.status).toBe(200);
-    userIds.push(res.body.data.user.id);
-    return { id: res.body.data.user.id as string, token: res.body.data.token as string };
+    const id = res.body.data.user.id as string;
+    userIds.push(id);
+    if (!res.body.data.user.phone) {
+      await prisma.user.update({
+        where: { id },
+        data: { phone: `+1555refsignup${randomUUID()}`.slice(0, 30) },
+      });
+    }
+    return { id, token: res.body.data.token as string };
   }
 
   async function createListing(token: string, overrides: { theaterLat?: number; theaterLng?: number } = {}) {
@@ -130,8 +139,7 @@ describe("referrals", () => {
   it("a referral only counts after the referred user completes a real listing, not just signup", async () => {
     const referrer = await createUser("cnt-referrer", "REFCOUNTA");
 
-    const phone = randomDigitPhone();
-    const referred = await verifyOtp(phone, "REFCOUNTA");
+    const referred = await verifyOtp(randomEmail(), "REFCOUNTA");
 
     const linked = await prisma.user.findUniqueOrThrow({ where: { id: referred.id } });
     expect(linked.referredByUserId).toBe(referrer.id);
@@ -151,8 +159,7 @@ describe("referrals", () => {
     const otherSeller = await createUser("cnt2-otherseller");
     const listingId = await createListing(otherSeller.token);
 
-    const phone = randomDigitPhone();
-    const referred = await verifyOtp(phone, "REFCOUNTB");
+    const referred = await verifyOtp(randomEmail(), "REFCOUNTB");
 
     expect((await getReferrals(referrer.token)).referredCount).toBe(0);
 
@@ -166,8 +173,7 @@ describe("referrals", () => {
   });
 
   it("signup with a missing/bogus ref code succeeds without linking anyone", async () => {
-    const phone = randomDigitPhone();
-    const referred = await verifyOtp(phone, "NOT-A-REAL-CODE");
+    const referred = await verifyOtp(randomEmail(), "NOT-A-REAL-CODE");
     const user = await prisma.user.findUniqueOrThrow({ where: { id: referred.id } });
     expect(user.referredByUserId).toBeNull();
   });
@@ -195,8 +201,7 @@ describe("referrals", () => {
     // The 20th referred user, signed up and qualified through the real
     // HTTP flow end to end - this is the one that should actually cross
     // the threshold.
-    const phone20 = randomDigitPhone();
-    const referred20 = await verifyOtp(phone20, "REFMILE20");
+    const referred20 = await verifyOtp(randomEmail(), "REFMILE20");
     await createListing(referred20.token);
 
     const afterMilestone = await getReferrals(referrer.token);
@@ -245,11 +250,11 @@ describe("referrals", () => {
   });
 
   it("a normal login (no ?ref=) for an existing user leaves referredByUserId untouched", async () => {
-    const phone = randomDigitPhone();
-    const existing = await createUser("existing-login", undefined, phone);
+    const email = randomEmail();
+    const existing = await createUser("existing-login", undefined, email);
 
-    const code = await issueOtp(phone);
-    const res = await request(app).post("/api/auth/otp/verify").send({ phone, code });
+    const code = await issueOtp(loginOtpIdentifier(email));
+    const res = await request(app).post("/api/auth/otp/verify").send({ email, code });
     expect(res.status).toBe(200);
 
     const afterLogin = await prisma.user.findUniqueOrThrow({ where: { id: existing.id } });
@@ -258,13 +263,13 @@ describe("referrals", () => {
 
   it("a ?ref= on a LOGIN (not signup) for an already-existing user is ignored, not retroactively applied", async () => {
     const referrer = await createUser("late-ref-referrer", "REFLATEAPPLY");
-    const phone = randomDigitPhone();
-    const existing = await createUser("late-ref-existing", undefined, phone);
+    const email = randomEmail();
+    const existing = await createUser("late-ref-existing", undefined, email);
 
-    const code = await issueOtp(phone);
+    const code = await issueOtp(loginOtpIdentifier(email));
     const res = await request(app)
       .post("/api/auth/otp/verify")
-      .send({ phone, code, ref: "REFLATEAPPLY" });
+      .send({ email, code, ref: "REFLATEAPPLY" });
     expect(res.status).toBe(200);
 
     const afterLogin = await prisma.user.findUniqueOrThrow({ where: { id: existing.id } });

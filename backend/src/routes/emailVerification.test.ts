@@ -118,12 +118,37 @@ describe("email verification", () => {
     expect(res.status).toBe(409);
   });
 
-  it("changing email via PATCH /me/profile clears verification", async () => {
-    // userId is verified from the earlier test in this file.
+  it("a verified email can't be changed via PATCH /me/profile - it's the login identity", async () => {
+    // userId is verified from the earlier test in this file. Changing it
+    // goes through POST /me/email/claim/* instead (see emailLogin.test.ts).
     const res = await request(app)
       .patch("/api/users/me/profile")
       .set("Authorization", `Bearer ${userToken}`)
       .field("fullName", "Verified Then Changed")
+      .field("email", `changed-${randomUUID()}@example.com`);
+    expect(res.status).toBe(409);
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(user.emailVerifiedAt).not.toBeNull();
+  });
+
+  it("a verified email survives a PATCH that omits it", async () => {
+    const before = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const res = await request(app)
+      .patch("/api/users/me/profile")
+      .set("Authorization", `Bearer ${userToken}`)
+      .field("fullName", "Verified Unchanged");
+    expect(res.status).toBe(200);
+    expect(res.body.data.user.email).toBe(before.email);
+    expect(res.body.data.user.isVerified).toBe(true);
+  });
+
+  it("changing an *unverified* email via PATCH /me/profile still works and stays unverified", async () => {
+    await prisma.user.update({ where: { id: userId }, data: { emailVerifiedAt: null } });
+    const res = await request(app)
+      .patch("/api/users/me/profile")
+      .set("Authorization", `Bearer ${userToken}`)
+      .field("fullName", "Unverified Then Changed")
       .field("email", `changed-${randomUUID()}@example.com`);
     expect(res.status).toBe(200);
     expect(res.body.data.user.isVerified).toBe(false);

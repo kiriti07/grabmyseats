@@ -28,19 +28,28 @@ function requireNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-// Both ADMIN and SUPPORT can look up a user by phone - the entry point for
-// the suspend/unsuspend action on the admin dashboard, since staff only
-// ever have a phone number to go on (same reason TransactionContact never
-// carries a user id - see shared/src/transaction.ts).
+// Both ADMIN and SUPPORT can look up a user by phone or email - the entry
+// point for the suspend/unsuspend action on the admin dashboard, since
+// staff only ever have a phone number or email address to go on (same
+// reason TransactionContact never carries a user id - see
+// shared/src/transaction.ts). Exactly one of ?phone= / ?email=, and an
+// exact match on the stored value - no partial or fuzzy search, so this
+// can't be used to browse users.
 adminRouter.get("/users", requireAdminAuth, requireRole([...STAFF_ROLES]), async (req, res) => {
   const phone = requireNonEmptyString(req.query.phone);
-  if (!phone) {
-    const body: ApiResponse<never> = { success: false, error: "phone is required" };
+  const email = requireNonEmptyString(req.query.email);
+  if (!phone === !email) {
+    const body: ApiResponse<never> = {
+      success: false,
+      error: "exactly one of phone or email is required",
+    };
     res.status(400).json(body);
     return;
   }
 
-  const user = await prisma.user.findUnique({ where: { phone } });
+  const user = phone
+    ? await prisma.user.findUnique({ where: { phone } })
+    : await prisma.user.findUnique({ where: { email: email! } });
   const body: ApiResponse<{ user: AdminUserSummary | null }> = {
     success: true,
     data: { user: user ? toAdminUserSummary(user) : null },

@@ -25,7 +25,7 @@ function VerifyForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { login } = useAuth();
-  const phone = searchParams.get("phone") ?? "";
+  const email = searchParams.get("email") ?? "";
   const next = safeNextPath(searchParams.get("next"));
   // Forwarded from /login - see that page's own comment. Only reaches the
   // backend as part of THIS verify call, never a later login.
@@ -40,10 +40,10 @@ function VerifyForm() {
   const [secondsLeft, setSecondsLeft] = useState(RESEND_COOLDOWN_SECONDS);
 
   useEffect(() => {
-    if (!phone) {
+    if (!email) {
       router.replace("/login");
     }
-  }, [phone, router]);
+  }, [email, router]);
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -62,7 +62,7 @@ function VerifyForm() {
 
     setIsVerifying(true);
     try {
-      const { user, token, isNewAccount } = await verifyOtpCode(phone, code, ref ?? undefined);
+      const { user, token, isNewAccount } = await verifyOtpCode(email, code, ref ?? undefined);
       login(token, user);
       if (isNewAccount) {
         // Referral linking (if any) already happened inside the verify
@@ -86,7 +86,7 @@ function VerifyForm() {
     setNotice(null);
     setIsResending(true);
     try {
-      await requestOtp(phone);
+      await requestOtp(email);
       setSecondsLeft(RESEND_COOLDOWN_SECONDS);
       setOtpKey((k) => k + 1);
       setCode("");
@@ -99,9 +99,12 @@ function VerifyForm() {
   }
 
   return (
-    <AuthShell title="Enter the code" subtitle={`We sent a 6-digit code to ${phone || "your phone"}`}>
+    <AuthShell
+      title="Enter the code"
+      subtitle={`If ${email || "that address"} can receive email, we've sent it a 6-digit code. Check your spam folder too.`}
+    >
       <div className="mb-4 flex items-center justify-center gap-2 text-sm text-muted">
-        <span>{phone}</span>
+        <span className="truncate">{email}</span>
         <Link
           href={(() => {
             const params = new URLSearchParams();

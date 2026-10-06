@@ -11,7 +11,7 @@ import { ErrorText } from "@/components/ui/ErrorText";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
 import { RatingSummaryBadge } from "@/components/ui/RatingSummaryBadge";
 import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
-import { WhatsAppButton } from "@/components/ui/WhatsAppButton";
+import { ContactPhone } from "@/components/ui/ContactPhone";
 import { ReportUserButton } from "@/components/report/ReportUserButton";
 import { formatShowtimeFull } from "@/lib/format";
 import { CONTACT_ONLY_DISCLAIMER } from "@/lib/paymentMode";
@@ -231,13 +231,12 @@ function ContactReveal({
           {contact.ratingSummary && (
             <RatingSummaryBadge summary={contact.ratingSummary} className="mt-0.5 block" />
           )}
-          <a
-            href={`tel:${contact.phone}`}
-            className="mt-1 block font-display text-lg tracking-wide text-gold hover:text-gold-dim"
-          >
-            {contact.phone}
-          </a>
-          {contact.hasWhatsapp && <WhatsAppButton phone={contact.phone} />}
+          <ContactPhone
+            phone={contact.phone}
+            hasWhatsapp={contact.hasWhatsapp}
+            className="justify-center"
+            linkClassName="font-display text-lg tracking-wide text-gold hover:text-gold-dim"
+          />
         </div>
         <Link
           href={`/transactions/${transactionId}`}
@@ -246,7 +245,7 @@ function ContactReveal({
           View details →
         </Link>
 
-        <ReportUserButton reportedPhone={contact.phone} relatedTransactionId={transactionId} />
+        <ReportUserButton relatedTransactionId={transactionId} />
       </div>
 
       <div className="rounded-2xl border border-error/40 bg-error/10 p-4 text-sm text-error">

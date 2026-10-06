@@ -42,7 +42,7 @@ describe("fraud reports", () => {
     reporterId = reporter.id;
     reporterToken = await issueSessionToken(reporter);
     reportedId = reported.id;
-    reportedPhone = reported.phone;
+    reportedPhone = reported.phone!;
     adminId = admin.id;
     adminToken = await issueAdminSessionToken(admin);
 

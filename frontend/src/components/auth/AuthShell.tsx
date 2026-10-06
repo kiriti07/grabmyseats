@@ -2,7 +2,7 @@ import Link from "next/link";
 
 // Shared by /login and /login/verify - neither had any way back to Home
 // before this (verify has its own "edit" link back to /login to change the
-// phone number, which is a different, narrower thing than abandoning
+// email address, which is a different, narrower thing than abandoning
 // sign-in entirely).
 export function AuthShell({
   title,
