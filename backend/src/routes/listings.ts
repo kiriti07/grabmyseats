@@ -31,6 +31,7 @@ import { consumeListingSeats } from "../lib/listingSeats";
 import { getRatingSummary } from "../lib/ratingSummary";
 import { checkAndAwardReferralMilestone } from "../lib/referral";
 import {
+  isPhoneVerified,
   isUserVerified,
   toListingDetail,
   toMyListing,
@@ -38,6 +39,8 @@ import {
   toSharedTransaction,
 } from "../lib/serialize";
 import { requireAuth } from "../middleware/auth";
+import { requireVerifiedIdentity } from "../lib/verificationGate";
+import { isActiveReviewAccount } from "../lib/reviewAccess";
 import { uploadScreenshot } from "../middleware/upload";
 
 const ALL_DELIVERY_METHODS: DeliveryMethod[] = ["IN_PERSON", "EMAIL_FORWARD"];
@@ -97,12 +100,14 @@ function requireFiniteNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-listingsRouter.post("/", requireAuth, uploadScreenshot, async (req, res) => {
+listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot, async (req, res) => {
   // A buyer is handed the seller's phone at contact reveal, so selling
-  // requires one on file - collected (optionally) at signup by POST
-  // /api/auth/complete-profile, or later via PATCH /api/users/me/profile.
-  // It's self-reported and unverified; the buyer sees it labelled as such.
-  if (!req.user!.phone) {
+  // requires one on file - collected at signup (/login/welcome) or later on
+  // the profile page. Whether it must also be *verified* is
+  // requireVerifiedIdentity's call (REQUIRE_PHONE_VERIFICATION); the buyer
+  // sees an unverified one labelled as such. The active Play review
+  // account is exempt - it can't receive a code to add one.
+  if (!req.user!.phone && !isActiveReviewAccount(req.user!)) {
     const body: ApiResponse<never> = {
       success: false,
       error: "Add a phone number to your profile before selling",
@@ -489,6 +494,13 @@ listingsRouter.get("/search", async (req, res) => {
     Prisma.sql`NOT EXISTS (
       SELECT 1 FROM "User" WHERE "User".id = "Listing"."sellerId" AND "User"."suspendedAt" IS NOT NULL
     )`,
+    // Same for the Play review account's (test) listings, except to the
+    // reviewer themselves - see lib/reviewAccess.ts. Applies whether or not
+    // the review login is currently switched on.
+    Prisma.sql`NOT EXISTS (
+      SELECT 1 FROM "User" WHERE "User".id = "Listing"."sellerId"
+        AND "User"."isReviewAccount" = true AND "User".id <> ${req.user?.id ?? ""}
+    )`,
   ];
   // Matches on either field - the search box (and the autocomplete
   // suggestions drawn from these same results) is a single free-text box
@@ -584,7 +596,9 @@ listingsRouter.get("/:id", requireAuth, async (req, res) => {
   const listing = await prisma.listing.findUnique({
     where: { id: listingId },
     include: {
-      seller: { select: { suspendedAt: true, email: true, emailVerifiedAt: true } },
+      seller: {
+        select: { suspendedAt: true, email: true, emailVerifiedAt: true, isReviewAccount: true },
+      },
     },
   });
   // A suspended seller's listing is treated as if it doesn't exist at all
@@ -592,7 +606,13 @@ listingsRouter.get("/:id", requireAuth, async (req, res) => {
   // as the search filter above, applied here to close the direct-link/
   // bookmark gap that filter alone can't cover, and deliberately not
   // revealing anything about *why* to a buyer who happens to have the URL.
-  if (!listing || listing.seller.suspendedAt) {
+  // The Play review account's listings get the same treatment for
+  // everyone but the reviewer (see the search filter above).
+  if (
+    !listing ||
+    listing.seller.suspendedAt ||
+    (listing.seller.isReviewAccount && listing.sellerId !== req.user!.id)
+  ) {
     const body: ApiResponse<never> = { success: false, error: "Listing not found" };
     res.status(404).json(body);
     return;
@@ -657,7 +677,11 @@ interface ReservationLockRow {
   availableDeliveryMethods: DeliveryMethod[];
 }
 
-listingsRouter.post("/:id/reserve", requireAuth, async (req, res) => {
+// requireVerifiedIdentity: reserving is what hands the buyer the seller's
+// contact in contact_only mode, and leads to it in escrow mode - gated here
+// (not only at GET /api/transactions/:id/contact) so a buyer never pays
+// and then finds the contact locked.
+listingsRouter.post("/:id/reserve", requireAuth, requireVerifiedIdentity, async (req, res) => {
   const listingId = req.params.id as string;
   const seats = requireFiniteNumber(req.body?.seats);
   const requestedDeliveryMethod =
@@ -778,11 +802,13 @@ listingsRouter.post("/:id/reserve", requireAuth, async (req, res) => {
       // here also rolls back the seat-lock UPDATE above via the enclosing
       // $transaction, so a failed reserve never leaves seats stuck as
       // held (contact_only mode has no such lock to roll back).
+      // The Play review account's listings can't be reserved by anyone
+      // else either (the reviewer can't reserve their own - see above).
       const seller = await tx.user.findUniqueOrThrow({
         where: { id: sellerId },
-        select: { suspendedAt: true },
+        select: { suspendedAt: true, isReviewAccount: true },
       });
-      if (seller.suspendedAt) throw new ListingNotFoundError();
+      if (seller.suspendedAt || seller.isReviewAccount) throw new ListingNotFoundError();
 
       // contact_only mode never asked the buyer for a delivery method (see
       // above), so it isn't validated against the listing's offered
@@ -841,11 +867,20 @@ listingsRouter.post("/:id/reserve", requireAuth, async (req, res) => {
     if (PAYMENT_MODE === "contact_only") {
       const seller = await prisma.user.findUniqueOrThrow({
         where: { id: sellerId },
-        select: { name: true, phone: true, hasWhatsapp: true, email: true, emailVerifiedAt: true },
+        select: {
+          name: true,
+          phone: true,
+          phoneVerifiedAt: true,
+          hasWhatsapp: true,
+          email: true,
+          emailVerifiedAt: true,
+          isReviewAccount: true,
+        },
       });
       contact = {
         name: seller.name,
         phone: seller.phone,
+        phoneVerified: isPhoneVerified(seller),
         hasWhatsapp: seller.hasWhatsapp,
         ratingSummary: await getRatingSummary(sellerId),
         isVerified: isUserVerified(seller),

@@ -23,26 +23,35 @@ import type {
   RatingSummary,
 } from "@grabmyseats/shared";
 import { PAYMENT_MODE } from "./config";
+import { isActiveReviewAccount } from "./reviewAccess";
 
-// true when the user has a confirmed email on file - which, since email
-// OTP is the login method, is every account created or logged into since
-// then (see POST /api/auth/otp/verify). Phone is never verified (it's
-// self-reported - see TransactionContact.phone), so it's not a condition
-// here. Checks email is non-null (not just
-// emailVerifiedAt) purely for clarity/defense-in-depth: PATCH
-// /api/users/me/profile already clears emailVerifiedAt whenever email
-// changes to anything else, including clearing it to null, so in practice
-// emailVerifiedAt can never be set while email is null - but a user with no
-// email should never read as verified even if that invariant were ever
-// violated. Used by toSharedUser below, and by the ListingDetail/
-// TransactionContact call sites that embed a seller/contact's verification
-// status without exposing their full identity (same pattern as
-// sellerRatingSummary/ratingSummary).
+// true when the user has a verified email on file - every account created
+// or logged into by email OTP, or that confirmed one via the add-identifier
+// or link flow. Checks email is non-null (not just emailVerifiedAt) purely
+// for defense-in-depth: a user with no email never reads as verified even
+// if that invariant were ever violated. The active Play review account
+// (lib/reviewAccess.ts) counts as verified without anything stored. Used by
+// toSharedUser below, by lib/verificationGate.ts, and by the ListingDetail/
+// TransactionContact call sites that embed a seller/contact's
+// verification status without exposing their full identity.
 export function isUserVerified(user: {
   email: string | null;
   emailVerifiedAt: Date | null;
+  isReviewAccount: boolean;
 }): boolean {
-  return user.email !== null && user.emailVerifiedAt !== null;
+  return (user.email !== null && user.emailVerifiedAt !== null) || isActiveReviewAccount(user);
+}
+
+// Same, for phone: proven by SMS code (lib/identity.ts). Phones added
+// without a code (while SMS isn't live) stay unverified and are labelled
+// as such wherever they're shown.
+export function isPhoneVerified(user: {
+  email: string | null;
+  phone: string | null;
+  phoneVerifiedAt: Date | null;
+  isReviewAccount: boolean;
+}): boolean {
+  return (user.phone !== null && user.phoneVerifiedAt !== null) || isActiveReviewAccount(user);
 }
 
 export function toSharedUser(user: PrismaUser): SharedUser {
@@ -61,6 +70,7 @@ export function toSharedUser(user: PrismaUser): SharedUser {
     address: user.address,
     hasWhatsapp: user.hasWhatsapp,
     isVerified: isUserVerified(user),
+    isPhoneVerified: isPhoneVerified(user),
   };
 }
 

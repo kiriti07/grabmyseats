@@ -16,6 +16,9 @@ import { ReportUserButton } from "@/components/report/ReportUserButton";
 import { formatShowtimeFull } from "@/lib/format";
 import { CONTACT_ONLY_DISCLAIMER } from "@/lib/paymentMode";
 import { ApiError, getListing, reserveListing } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { useVerificationGaps } from "@/hooks/useVerificationGaps";
+import { VerifyToContinue } from "@/components/account/VerifyToContinue";
 
 function ListingDetailContent() {
   const { listingId } = useParams<{ listingId: string }>();
@@ -34,6 +37,8 @@ function ListingDetailContent() {
   const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod | null>(null);
   const [isReserving, setIsReserving] = useState(false);
   const [reserveError, setReserveError] = useState<string | null>(null);
+  const { user } = useAuth();
+  const verificationGaps = useVerificationGaps(user);
 
   // Set only in PAYMENT_MODE=contact_only, once reserve succeeds - the
   // reveal happens right here inline (not a navigation to a payment
@@ -179,17 +184,31 @@ function ListingDetailContent() {
                   ₹{seats * listing.pricePerSeat}
                 </p>
                 <ErrorText>{reserveError}</ErrorText>
-                <div className="mt-4">
-                  <Button onClick={handleReserve} isLoading={isReserving}>
-                    {isReserving
-                      ? listing.paymentMode === "contact_only"
-                        ? "Getting contact info..."
-                        : "Reserving..."
-                      : listing.paymentMode === "contact_only"
-                        ? "Get seller's contact info"
-                        : "Reserve seats"}
-                  </Button>
-                </div>
+                {/* Reserving needs a verified email (and phone, when
+                    required) - prompted here rather than failing on tap. */}
+                {verificationGaps.length > 0 ? (
+                  <VerifyToContinue
+                    gaps={verificationGaps}
+                    action={
+                      listing.paymentMode === "contact_only"
+                        ? "see the seller's contact info"
+                        : "reserve seats"
+                    }
+                    className="mt-4"
+                  />
+                ) : (
+                  <div className="mt-4">
+                    <Button onClick={handleReserve} isLoading={isReserving}>
+                      {isReserving
+                        ? listing.paymentMode === "contact_only"
+                          ? "Getting contact info..."
+                          : "Reserving..."
+                        : listing.paymentMode === "contact_only"
+                          ? "Get seller's contact info"
+                          : "Reserve seats"}
+                    </Button>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="mt-8 text-center text-sm text-muted">
@@ -233,6 +252,7 @@ function ContactReveal({
           )}
           <ContactPhone
             phone={contact.phone}
+            phoneVerified={contact.phoneVerified}
             hasWhatsapp={contact.hasWhatsapp}
             className="justify-center"
             linkClassName="font-display text-lg tracking-wide text-gold hover:text-gold-dim"

@@ -1,6 +1,16 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from "vitest";
 import request from "supertest";
 import { app } from "../app";
 import { prisma } from "../lib/prisma";
@@ -9,13 +19,13 @@ import { issueSessionToken } from "../lib/session";
 import { issueAdminSessionToken } from "../lib/adminSession";
 import { issueOtp } from "../lib/otpStore";
 import { issueEmailVerificationToken } from "../lib/emailVerificationStore";
-import { claimOtpIdentifier, loginOtpIdentifier } from "../lib/emailIdentity";
+import { claimOtpIdentifier, loginOtpIdentifier } from "../lib/identity";
 import { emailProvider } from "../lib/email";
 
 // End-to-end coverage for email-OTP login and everything that hangs off
 // "an email is a login identity only once verified" (lib/emailIdentity.ts):
 // POST /api/auth/otp/request + /otp/verify, the add/change-email claim
-// flow (POST /api/users/me/email/claim/*), the link-verify flow's conflict
+// flow (POST /api/users/me/identifiers/claim/*), the link-verify flow's conflict
 // handling, phone collection (complete-profile, PATCH profile, the
 // listing-creation gate), and admin lookup by email - against the real
 // local Postgres + Redis through the actual Express app, not mocked. The
@@ -54,7 +64,7 @@ describe("email login", () => {
   }
 
   async function loginWithCode(email: string, extra: Record<string, string> = {}) {
-    const code = await issueOtp(loginOtpIdentifier(email.trim().toLowerCase()));
+    const code = await issueOtp(loginOtpIdentifier("email", email.trim().toLowerCase()));
     const res = await request(app)
       .post("/api/auth/otp/verify")
       .send({ email, code, ...extra });
@@ -62,20 +72,31 @@ describe("email login", () => {
     return res;
   }
 
-  // Every test in this file shares supertest's single loopback IP, and
-  // these limiters' counters live in Redis across runs - so the IP and
-  // global buckets are reset before each test. Per-email buckets never
-  // need it: every test uses fresh addresses.
+  // Each test gets its own client IP for the per-IP OTP limit (otpIpLimiter):
+  // other suites hit the same endpoints in parallel from the same loopback
+  // address, and the counters live in Redis. trust proxy "loopback" is
+  // test-only here - it lets supertest's X-Forwarded-For set req.ip.
+  let clientIp = "";
+  function randomClientIp(): string {
+    const octet = () => Math.floor(Math.random() * 254) + 1;
+    return `10.${octet()}.${octet()}.${octet()}`;
+  }
+
+  // The global bucket is shared by everything, so it's reset before each
+  // test. Per-email buckets never need it: every test uses fresh addresses.
   async function resetSharedRateLimits() {
-    for (const pattern of ["rl:otp-ip:*", "rl:otp-global:*"]) {
-      const keys = await redis.keys(pattern);
-      if (keys.length > 0) await redis.del(...keys);
-    }
+    const keys = await redis.keys("rl:otp-global:*");
+    if (keys.length > 0) await redis.del(...keys);
   }
 
   let sendSpy: MockInstance<(to: string, subject: string, body: string) => Promise<void>>;
 
+  beforeAll(() => {
+    app.set("trust proxy", "loopback");
+  });
+
   beforeEach(async () => {
+    clientIp = randomClientIp();
     await resetSharedRateLimits();
     sendSpy = vi.spyOn(emailProvider, "send").mockResolvedValue(undefined);
   });
@@ -99,8 +120,14 @@ describe("email login", () => {
       const existingEmail = randomEmail("existing");
       await createUser({ email: existingEmail, verified: true });
 
-      const existing = await request(app).post("/api/auth/otp/request").send({ email: existingEmail });
-      const fresh = await request(app).post("/api/auth/otp/request").send({ email: randomEmail("new") });
+      const existing = await request(app)
+        .post("/api/auth/otp/request")
+        .set("X-Forwarded-For", clientIp)
+        .send({ email: existingEmail });
+      const fresh = await request(app)
+        .post("/api/auth/otp/request")
+        .set("X-Forwarded-For", clientIp)
+        .send({ email: randomEmail("new") });
 
       expect(existing.status).toBe(200);
       expect(fresh.status).toBe(existing.status);
@@ -111,6 +138,7 @@ describe("email login", () => {
       const email = randomEmail("format");
       const res = await request(app)
         .post("/api/auth/otp/request")
+        .set("X-Forwarded-For", clientIp)
         .send({ email: `  ${email.toUpperCase()}  ` });
       expect(res.status).toBe(200);
 
@@ -127,6 +155,7 @@ describe("email login", () => {
       const email = randomEmail("relay");
       await request(app)
         .post("/api/auth/otp/request")
+        .set("X-Forwarded-For", clientIp)
         .send({ email, ref: "Visit http://evil.example", name: "Click here" });
 
       await vi.waitFor(() => expect(sendSpy).toHaveBeenCalledTimes(1));
@@ -137,7 +166,10 @@ describe("email login", () => {
 
     it("400s an invalid address, and one carrying a CR/LF header-injection attempt", async () => {
       for (const email of ["not-an-email", "a@b.com\r\nBcc: victim@example.com", "", 42]) {
-        const res = await request(app).post("/api/auth/otp/request").send({ email });
+        const res = await request(app)
+          .post("/api/auth/otp/request")
+          .set("X-Forwarded-For", clientIp)
+          .send({ email });
         expect(res.status).toBe(400);
       }
       expect(sendSpy).not.toHaveBeenCalled();
@@ -147,12 +179,16 @@ describe("email login", () => {
       const id = randomUUID();
       const aliases = [`rl-${id}@example.com`, `rl-${id}+a@example.com`, `RL-${id}+b@example.com`];
       for (const email of aliases) {
-        const res = await request(app).post("/api/auth/otp/request").send({ email });
+        const res = await request(app)
+          .post("/api/auth/otp/request")
+          .set("X-Forwarded-For", clientIp)
+          .send({ email });
         expect(res.status).toBe(200);
       }
 
       const blocked = await request(app)
         .post("/api/auth/otp/request")
+        .set("X-Forwarded-For", clientIp)
         .send({ email: `rl-${id}+c@example.com` });
       expect(blocked.status).toBe(429);
       // Says nothing about whether an account exists.
@@ -162,7 +198,10 @@ describe("email login", () => {
     it("rate-limits per IP across different addresses", async () => {
       const statuses: number[] = [];
       for (let i = 0; i < 11; i++) {
-        const res = await request(app).post("/api/auth/otp/request").send({ email: randomEmail("ip") });
+        const res = await request(app)
+          .post("/api/auth/otp/request")
+          .set("X-Forwarded-For", clientIp)
+          .send({ email: randomEmail("ip") });
         statuses.push(res.status);
       }
       expect(statuses.slice(0, 10).every((s) => s === 200)).toBe(true);
@@ -219,7 +258,7 @@ describe("email login", () => {
 
     it("a wrong code is rejected and consumes the real one", async () => {
       const email = randomEmail("wrong");
-      const code = await issueOtp(loginOtpIdentifier(email));
+      const code = await issueOtp(loginOtpIdentifier("email", email));
       const wrong = code === "000001" ? "000002" : "000001";
 
       const first = await request(app).post("/api/auth/otp/verify").send({ email, code: wrong });
@@ -231,17 +270,18 @@ describe("email login", () => {
     it("an add-email code can't be redeemed as a login code", async () => {
       const { user } = await createUser({});
       const email = randomEmail("crossflow");
-      const code = await issueOtp(claimOtpIdentifier(user.id, email));
+      const code = await issueOtp(claimOtpIdentifier(user.id, "email", email));
 
       const res = await request(app).post("/api/auth/otp/verify").send({ email, code });
       expect(res.status).toBe(401);
     });
   });
 
-  describe("add / change email (POST /api/users/me/email/claim/*)", () => {
+  describe("add / change email (POST /api/users/me/identifiers/claim/*)", () => {
     it("requires auth", async () => {
       const res = await request(app)
-        .post("/api/users/me/email/claim/request")
+        .post("/api/users/me/identifiers/claim/request")
+        .set("X-Forwarded-For", clientIp)
         .send({ email: randomEmail() });
       expect(res.status).toBe(401);
     });
@@ -251,7 +291,8 @@ describe("email login", () => {
       const email = randomEmail("legacy");
 
       const reqRes = await request(app)
-        .post("/api/users/me/email/claim/request")
+        .post("/api/users/me/identifiers/claim/request")
+        .set("X-Forwarded-For", clientIp)
         .set("Authorization", `Bearer ${token}`)
         .send({ email });
       expect(reqRes.status).toBe(200);
@@ -263,7 +304,7 @@ describe("email login", () => {
       expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).email).toBeNull();
 
       const verifyRes = await request(app)
-        .post("/api/users/me/email/claim/verify")
+        .post("/api/users/me/identifiers/claim/verify")
         .set("Authorization", `Bearer ${token}`)
         .send({ email, code });
       expect(verifyRes.status).toBe(200);
@@ -279,10 +320,10 @@ describe("email login", () => {
       const oldEmail = randomEmail("old-unverified");
       const { user, token } = await createUser({ email: oldEmail, verified: false });
       const email = randomEmail("new-verified");
-      const code = await issueOtp(claimOtpIdentifier(user.id, email));
+      const code = await issueOtp(claimOtpIdentifier(user.id, "email", email));
 
       const res = await request(app)
-        .post("/api/users/me/email/claim/verify")
+        .post("/api/users/me/identifiers/claim/verify")
         .set("Authorization", `Bearer ${token}`)
         .send({ email, code });
       expect(res.status).toBe(200);
@@ -293,10 +334,10 @@ describe("email login", () => {
       const email = randomEmail("contested");
       const { user: squatter } = await createUser({ email, verified: false });
       const { user: owner, token } = await createUser({});
-      const code = await issueOtp(claimOtpIdentifier(owner.id, email));
+      const code = await issueOtp(claimOtpIdentifier(owner.id, "email", email));
 
       const res = await request(app)
-        .post("/api/users/me/email/claim/verify")
+        .post("/api/users/me/identifiers/claim/verify")
         .set("Authorization", `Bearer ${token}`)
         .send({ email, code });
       expect(res.status).toBe(200);
@@ -308,10 +349,10 @@ describe("email login", () => {
       const email = randomEmail("taken");
       const { user: holder } = await createUser({ email, verified: true });
       const { user: other, token } = await createUser({});
-      const code = await issueOtp(claimOtpIdentifier(other.id, email));
+      const code = await issueOtp(claimOtpIdentifier(other.id, "email", email));
 
       const res = await request(app)
-        .post("/api/users/me/email/claim/verify")
+        .post("/api/users/me/identifiers/claim/verify")
         .set("Authorization", `Bearer ${token}`)
         .send({ email, code });
       expect(res.status).toBe(409);
@@ -326,10 +367,10 @@ describe("email login", () => {
       const { user: requester } = await createUser({});
       const { token: otherToken } = await createUser({});
       const email = randomEmail("bound");
-      const code = await issueOtp(claimOtpIdentifier(requester.id, email));
+      const code = await issueOtp(claimOtpIdentifier(requester.id, "email", email));
 
       const res = await request(app)
-        .post("/api/users/me/email/claim/verify")
+        .post("/api/users/me/identifiers/claim/verify")
         .set("Authorization", `Bearer ${otherToken}`)
         .send({ email, code });
       expect(res.status).toBe(401);
@@ -339,10 +380,10 @@ describe("email login", () => {
       const oldEmail = randomEmail("change-old");
       const { user, token } = await createUser({ email: oldEmail, verified: true });
       const newEmail = randomEmail("change-new");
-      const code = await issueOtp(claimOtpIdentifier(user.id, newEmail));
+      const code = await issueOtp(claimOtpIdentifier(user.id, "email", newEmail));
 
       const res = await request(app)
-        .post("/api/users/me/email/claim/verify")
+        .post("/api/users/me/identifiers/claim/verify")
         .set("Authorization", `Bearer ${token}`)
         .send({ email: newEmail, code });
       expect(res.status).toBe(200);

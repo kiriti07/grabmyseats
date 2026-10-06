@@ -20,7 +20,11 @@ describe("hasWhatsapp", () => {
 
   beforeAll(async () => {
     const user = await prisma.user.create({
-      data: { phone: `+1555wa${randomUUID()}`.slice(0, 30) },
+      data: {
+        phone: `+1555wa${randomUUID()}`.slice(0, 30),
+        email: `wa-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+      },
     });
     userId = user.id;
     userToken = await issueSessionToken(user);
@@ -69,12 +73,18 @@ describe("hasWhatsapp", () => {
       const seller = await prisma.user.create({
         data: {
           phone: `+1555waseller${suffix}`.slice(0, 30),
+          email: `waseller-${randomUUID()}@example.com`,
+          emailVerifiedAt: new Date(),
           name: "WA Seller",
           hasWhatsapp: true,
         },
       });
       const buyer = await prisma.user.create({
-        data: { phone: `+1555wabuyer${suffix}`.slice(0, 30) },
+        data: {
+          phone: `+1555wabuyer${suffix}`.slice(0, 30),
+          email: `wabuyer-${randomUUID()}@example.com`,
+          emailVerifiedAt: new Date(),
+        },
       });
       sellerId = seller.id;
       sellerToken = await issueSessionToken(seller);
@@ -140,10 +150,19 @@ describe("hasWhatsapp", () => {
 
       const suffix = randomUUID();
       const seller = await prisma.user.create({
-        data: { phone: `+1555wacoseller${suffix}`.slice(0, 30), hasWhatsapp: true },
+        data: {
+          phone: `+1555wacoseller${suffix}`.slice(0, 30),
+          email: `wacoseller-${randomUUID()}@example.com`,
+          emailVerifiedAt: new Date(),
+          hasWhatsapp: true,
+        },
       });
       const buyer = await prisma.user.create({
-        data: { phone: `+1555wacobuyer${suffix}`.slice(0, 30) },
+        data: {
+          phone: `+1555wacobuyer${suffix}`.slice(0, 30),
+          email: `wacobuyer-${randomUUID()}@example.com`,
+          emailVerifiedAt: new Date(),
+        },
       });
       sellerId = seller.id;
       buyerToken = await issueSessionToken(buyer);

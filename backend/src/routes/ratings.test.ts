@@ -28,13 +28,26 @@ describe("ratings", () => {
   beforeAll(async () => {
     const suffix = randomUUID();
     const seller = await prisma.user.create({
-      data: { phone: `+1555ratingseller${suffix}`.slice(0, 30), name: "Rating Test Seller" },
+      data: {
+        phone: `+1555ratingseller${suffix}`.slice(0, 30),
+        email: `ratingseller-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+        name: "Rating Test Seller",
+      },
     });
     const buyer = await prisma.user.create({
-      data: { phone: `+1555ratingbuyer${suffix}`.slice(0, 30) },
+      data: {
+        phone: `+1555ratingbuyer${suffix}`.slice(0, 30),
+        email: `ratingbuyer-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+      },
     });
     const stranger = await prisma.user.create({
-      data: { phone: `+1555ratingstranger${suffix}`.slice(0, 30) },
+      data: {
+        phone: `+1555ratingstranger${suffix}`.slice(0, 30),
+        email: `ratingstranger-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+      },
     });
     sellerId = seller.id;
     buyerId = buyer.id;

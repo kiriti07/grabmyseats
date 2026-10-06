@@ -30,3 +30,23 @@ export const PAYMENT_MODE: PaymentMode =
 // actually point at. Defaults to the production apex domain so a missing
 // env var in dev still produces a syntactically valid link.
 export const APP_URL = process.env.APP_URL ?? "https://grabmyseats.com";
+
+// When true, listing a ticket, reserving one, and viewing a counterparty's
+// contact also require a verified phone (on top of the always-required
+// verified email) - see lib/verificationGate.ts. Off by default until SMS
+// delivery is live (lib/sms). Read per call rather than once at module load
+// (unlike PAYMENT_MODE) so tests can toggle it; in a running server the
+// env doesn't change, so it still only takes effect on restart.
+export function requirePhoneVerification(): boolean {
+  return process.env.REQUIRE_PHONE_VERIFICATION === "true";
+}
+
+// Country calling codes (no "+") phone OTP may be sent to - a guard against
+// SMS-pumping fraud (bots requesting codes to premium-rate numbers on our
+// bill). Comma-separated; defaults to India only.
+export function smsAllowedCountryCodes(): string[] {
+  return (process.env.SMS_ALLOWED_COUNTRY_CODES ?? "91")
+    .split(",")
+    .map((c) => c.trim().replace(/^\+/, ""))
+    .filter((c) => /^\d{1,3}$/.test(c));
+}

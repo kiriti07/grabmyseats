@@ -51,6 +51,24 @@ export default function Home() {
         <h1 className="text-center font-display text-3xl tracking-wide text-foreground">
           What are you here for?
         </h1>
+        {/* Logged-out entry points - both take an email or a phone
+            number (see components/auth/IdentifierAuth.tsx). */}
+        {!isLoading && !isAuthenticated && (
+          <div className="flex w-full max-w-sm gap-3">
+            <Link
+              href="/login"
+              className="flex-1 rounded-lg border border-gold px-4 py-3 text-center text-sm font-semibold text-gold hover:bg-gold/10"
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/signup"
+              className="flex-1 rounded-lg bg-gold px-4 py-3 text-center text-sm font-semibold text-[#1a1408] hover:bg-gold-dim"
+            >
+              Sign up
+            </Link>
+          </div>
+        )}
         <SearchBar
           value={query}
           onChange={setQuery}

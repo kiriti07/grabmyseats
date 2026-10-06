@@ -33,7 +33,12 @@ describe("category", () => {
   beforeAll(async () => {
     const suffix = randomUUID();
     const seller = await prisma.user.create({
-      data: { phone: `+1555catseller${suffix}`.slice(0, 30), name: "Test Seller" },
+      data: {
+        phone: `+1555catseller${suffix}`.slice(0, 30),
+        email: `catseller-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+        name: "Test Seller",
+      },
     });
     sellerId = seller.id;
     sellerToken = await issueSessionToken(seller);

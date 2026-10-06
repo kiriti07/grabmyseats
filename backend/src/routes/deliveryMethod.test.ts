@@ -54,7 +54,12 @@ describe("delivery method", () => {
   async function createUser(label: string) {
     const suffix = randomUUID();
     const user = await prisma.user.create({
-      data: { phone: `+1555${label}${suffix}`.slice(0, 30), name: `Test ${label}` },
+      data: {
+        phone: `+1555${label}${suffix}`.slice(0, 30),
+        name: `Test ${label}`,
+        email: `${label}-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+      },
     });
     const token = await issueSessionToken(user);
     return { id: user.id, token };

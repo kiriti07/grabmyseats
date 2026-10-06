@@ -1,7 +1,7 @@
 export interface User {
   id: string;
-  // Self-reported and never verified (there's no phone verification - SMS
-  // OTP isn't wired up), so it's always shown as "Unverified" wherever it's
+  // A login identity once verified by SMS code (isPhoneVerified below);
+  // until then self-reported, and shown as "Unverified" wherever it's
   // revealed. null until the user adds one; required before selling (POST
   // /api/listings).
   phone: string | null;
@@ -25,16 +25,39 @@ export interface User {
   hasWhatsapp: boolean;
   // Derived (backend/src/lib/serialize.ts's isUserVerified), not a stored
   // column - true once email is both set and verified: by email-OTP login,
-  // by POST /api/users/me/email/claim/verify, or by the
-  // send-verification -> GET /api/users/me/email/verify link. Phone never
-  // counts toward this (it's unverified). false means this account has no
-  // working login identity yet - see the "add an email" banner on
-  // /account. Powers the "Verified" badge on /account; the seller/contact
+  // by POST /api/users/me/identifiers/claim/verify, or by the
+  // send-verification -> GET /api/users/me/email/verify link. About email
+  // only - phone has isPhoneVerified below. A verified email is required to
+  // list, reserve or view contact details (always), as is a verified phone
+  // when AuthOptions.requirePhoneVerification is on - see the "finish
+  // verifying" banner on /account. Powers the "Verified" badge on /account; the seller/contact
   // equivalent for a user viewed through a listing or transaction is
   // ListingDetail.sellerIsVerified / TransactionContact.isVerified below,
   // not this field (neither of those embeds a full User).
   isVerified: boolean;
+  // Derived, like isVerified: phone set and proven by SMS code.
+  isPhoneVerified: boolean;
 }
+
+export type IdentifierChannel = "email" | "phone";
+
+// GET /api/auth/options - what the sign-in/sign-up and verification screens
+// may offer. phoneOtpAvailable is false in production until a real SMS
+// provider is configured (codes would never arrive); smsCountryCodes are
+// the calling codes (no "+") phone codes may be sent to.
+export interface AuthOptions {
+  phoneOtpAvailable: boolean;
+  requirePhoneVerification: boolean;
+  smsCountryCodes: string[];
+}
+
+// POST /api/auth/otp/verify (and POST /api/auth/signup/confirm, which only
+// ever returns the first shape). noAccount only comes back for a sign-in
+// whose (now proven) identifier has no account - signupToken then confirms
+// "create an account?" without a second code.
+export type OtpVerifyResult =
+  | { user: User; token: string; isNewAccount: boolean }
+  | { noAccount: true; signupToken: string };
 
 // PATCH /api/users/me/profile request body (sent as multipart/form-data so
 // profileImage can ride along - see the frontend's updateProfile). Every
@@ -49,10 +72,11 @@ export interface UpdateProfileInput {
   fullName: string;
   // Ignored when unchanged; a *verified* email can't be changed here (409)
   // - that goes through the claim flow instead (see the frontend's
-  // requestEmailClaimCode/verifyEmailClaimCode).
+  // requestIdentifierClaimCode/verifyIdentifierClaimCode).
   email?: string;
   // Omitted = unchanged, "" = clear (refused while the user has live
-  // listings). E.164.
+  // listings). E.164. Same rule as email once verified: 409 here, change
+  // it through the claim flow.
   phone?: string;
   dateOfBirth?: string;
   gender?: string;
@@ -78,9 +102,11 @@ export interface SellerDeliveryEligibility {
 // POST /api/auth/otp/verify response). Sets User.name/phone directly -
 // deliberately not UpdateProfileInput's fullName/dateOfBirth/etc, which
 // are a separate, later-in-the-relationship set of fields edited via
-// PATCH /api/users/me/profile. Email isn't here: it's already the
-// verified login identity. phone is optional at signup but required to
-// sell; hasWhatsapp only applies when phone is given.
+// PATCH /api/users/me/profile. Verified identifiers aren't set here - they
+// go through POST /api/users/me/identifiers/claim/*. phone is the
+// *unverified* fallback for an email signup when SMS codes aren't
+// available; required to sell either way. hasWhatsapp applies to whichever
+// phone is on file.
 export interface CompleteProfileInput {
   name: string;
   phone?: string;

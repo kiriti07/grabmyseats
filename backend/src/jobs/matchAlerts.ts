@@ -37,6 +37,9 @@ export async function matchAlerts(): Promise<number> {
     where: {
       createdAt: { gt: checkFrom, lte: runStartedAt },
       status: { in: ["ACTIVE", "PARTIALLY_SOLD"] },
+      // The Play review account's test listings are never shown to anyone
+      // else (see GET /api/listings/search), so never alerted on either.
+      seller: { isReviewAccount: false },
     },
     select: { id: true, movieName: true, category: true, theaterLat: true, theaterLng: true },
   });
@@ -52,6 +55,11 @@ export async function matchAlerts(): Promise<number> {
       JOIN "User" u ON u.id = ta."userId"
       WHERE ta."isActive" = true
         AND ta."expiresAt" > now()
+        -- Only to a phone the user has proven they own by SMS code: an
+        -- unverified phone is self-reported, and texting it would let
+        -- anyone point alert SMS from us at someone else's number.
+        AND u.phone IS NOT NULL
+        AND u."phoneVerifiedAt" IS NOT NULL
         AND ta.category = ${listing.category}::"Category"
         AND similarity(ta."titleQuery", ${listing.movieName}) > ${TITLE_SIMILARITY_THRESHOLD}
         AND ST_DWithin(ta."location", ${origin}, ta."radiusKm" * 1000)

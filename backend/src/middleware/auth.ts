@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { getSessionFromRequest } from "../lib/session";
 import { prisma } from "../lib/prisma";
+import { isActiveReviewAccount } from "../lib/reviewAccess";
 
 // Attaches `req.user` when a valid Auth.js session token is present
 // (cookie or `Authorization: Bearer`). Never blocks the request -
@@ -14,7 +15,11 @@ export async function attachUser(
     const session = await getSessionFromRequest(req);
     if (session?.sub) {
       const user = await prisma.user.findUnique({ where: { id: session.sub } });
-      if (user) req.user = user;
+      // A Play review account's session only counts while the review
+      // login is switched on (lib/reviewAccess.ts) - unsetting
+      // REVIEW_EMAIL/REVIEW_OTP ends any reviewer session still in its
+      // 30-day lifetime, not just new logins.
+      if (user && (!user.isReviewAccount || isActiveReviewAccount(user))) req.user = user;
     }
   } catch {
     // Malformed/expired token: proceed unauthenticated.

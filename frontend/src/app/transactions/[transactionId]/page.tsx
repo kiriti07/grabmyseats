@@ -537,6 +537,7 @@ function ContactOnlyDetail({
               )}
               <ContactPhone
                 phone={contact.phone}
+                phoneVerified={contact.phoneVerified}
                 hasWhatsapp={contact.hasWhatsapp}
                 linkClassName="font-display text-lg tracking-wide text-gold hover:text-gold-dim"
               />
@@ -767,6 +768,7 @@ function ContactSection({
           )}
           <ContactPhone
             phone={contact.phone}
+            phoneVerified={contact.phoneVerified}
             hasWhatsapp={contact.hasWhatsapp}
             linkClassName="text-gold hover:text-gold-dim"
           />

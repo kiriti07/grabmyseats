@@ -56,14 +56,15 @@ export interface Transaction {
 // carries for the contact-only reserve response - same shape either way.
 // phone, when present, is a tel:-usable E.164 string ("+<countrycode>
 // <digits>", no spaces/formatting - see PHONE_RE in
-// backend/src/lib/validators.ts). It's self-reported and never verified,
-// so the frontend always labels it "Unverified". null when this party
-// hasn't added one - a seller always has one (required to list), a buyer
-// may not. hasWhatsapp just tells the frontend whether phone can *also* be
-// turned into a wa.me link.
+// backend/src/lib/validators.ts). phoneVerified says whether it was proven
+// by SMS code; the frontend labels it "Unverified" otherwise. null when
+// this party hasn't added one - a seller always has one (required to
+// list), a buyer may not. hasWhatsapp just tells the frontend whether phone
+// can *also* be turned into a wa.me link.
 export interface TransactionContact {
   name: string | null;
   phone: string | null;
+  phoneVerified: boolean;
   hasWhatsapp: boolean;
   // The seller's rating summary, when this contact IS the seller (i.e.
   // the caller is the buyer) - null when the caller is the seller viewing

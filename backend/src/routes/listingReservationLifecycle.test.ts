@@ -40,10 +40,20 @@ describe("listing search reflects live reservation state", () => {
 
     const suffix = randomUUID();
     const seller = await prisma.user.create({
-      data: { phone: `+1555seller${suffix}`.slice(0, 30), name: "Test Seller" },
+      data: {
+        phone: `+1555seller${suffix}`.slice(0, 30),
+        email: `seller-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+        name: "Test Seller",
+      },
     });
     const buyer = await prisma.user.create({
-      data: { phone: `+1555buyer${suffix}`.slice(0, 30), name: "Test Buyer" },
+      data: {
+        phone: `+1555buyer${suffix}`.slice(0, 30),
+        email: `buyer-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+        name: "Test Buyer",
+      },
     });
     sellerId = seller.id;
     buyerId = buyer.id;

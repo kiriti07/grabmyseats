@@ -17,7 +17,13 @@ import { requireEscrowMode } from "../middleware/paymentMode";
 import { payoutProvider } from "../lib/payments";
 import { storageProvider } from "../lib/storage";
 import { PAYMENT_MODE } from "../lib/config";
-import { isUserVerified, toSharedTransaction, toSharedRating } from "../lib/serialize";
+import {
+  isPhoneVerified,
+  isUserVerified,
+  toSharedTransaction,
+  toSharedRating,
+} from "../lib/serialize";
+import { requireVerifiedIdentity } from "../lib/verificationGate";
 import { getRatingSummary } from "../lib/ratingSummary";
 import { haversineDistanceMeters } from "../lib/geo/haversine";
 import { uploadEmailForward } from "../middleware/upload";
@@ -664,7 +670,10 @@ transactionsRouter.post("/:id/check-in", requireEscrowMode, requireAuth, async (
 // timing off of. contact_only mode has none of that (reserve hands the
 // contact straight back - see POST /:id/reserve), so this skips the window
 // check there and is available for the life of the reservation.
-transactionsRouter.get("/:id/contact", requireAuth, async (req, res) => {
+// requireVerifiedIdentity: the caller (buyer or seller) must have verified
+// their own email - and phone, under REQUIRE_PHONE_VERIFICATION - before
+// seeing the other party's contact. See lib/verificationGate.ts.
+transactionsRouter.get("/:id/contact", requireAuth, requireVerifiedIdentity, async (req, res) => {
   const transactionId = req.params.id as string;
 
   try {
@@ -700,6 +709,7 @@ transactionsRouter.get("/:id/contact", requireAuth, async (req, res) => {
         contact: {
           name: otherParty.name,
           phone: otherParty.phone,
+          phoneVerified: isPhoneVerified(otherParty),
           hasWhatsapp: otherParty.hasWhatsapp,
           ratingSummary,
           isVerified: isUserVerified(otherParty),

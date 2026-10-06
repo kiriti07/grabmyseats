@@ -9,7 +9,8 @@ import { INPUT_CLASS } from "@/lib/styles";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError, fetchProfile, updateProfile } from "@/lib/api";
 import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
-import { EmailClaimForm } from "@/components/account/EmailClaimForm";
+import { IdentifierClaimForm } from "@/components/account/IdentifierClaimForm";
+import { useAuthOptions } from "@/hooks/useAuthOptions";
 
 // Matches MAX_FILE_SIZE_BYTES in backend/src/middleware/upload.ts - caught
 // here too so a seller/buyer finds out before waiting on an upload the
@@ -31,11 +32,16 @@ export default function ProfilePage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   // A verified email is the sign-in identity: shown read-only, and only
-  // changed through EmailClaimForm (code to the new address first) - PATCH
+  // changed through IdentifierClaimForm (code to the new address first) - PATCH
   // /api/users/me/profile refuses to change it.
   const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [isChangingEmail, setIsChangingEmail] = useState(false);
   const [phone, setPhone] = useState("");
+  // Same rule for a verified phone; an unverified one stays a plain field
+  // here, and can be verified by text when SMS codes are available.
+  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
+  const [phoneClaimOpen, setPhoneClaimOpen] = useState(false);
+  const { phoneOtpAvailable } = useAuthOptions();
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [gender, setGender] = useState("");
   const [address, setAddress] = useState("");
@@ -66,6 +72,7 @@ export default function ProfilePage() {
         setEmail(user.email ?? "");
         setIsEmailVerified(user.isVerified);
         setPhone(user.phone ?? "");
+        setIsPhoneVerified(user.isPhoneVerified);
         setDateOfBirth(isoToDateInputValue(user.dateOfBirth));
         setGender(user.gender ?? "");
         setAddress(user.address ?? "");
@@ -119,7 +126,8 @@ export default function ProfilePage() {
           fullName: fullName.trim(),
           // Omitted for a verified email - it's unchanged here by design.
           email: isEmailVerified ? undefined : email.trim() || undefined,
-          phone: phone.trim(),
+          // Omitted for a verified phone - it's unchanged here by design.
+          phone: isPhoneVerified ? undefined : phone.trim(),
           dateOfBirth: dateOfBirth || undefined,
           gender: gender.trim() || undefined,
           address: address.trim() || undefined,
@@ -171,20 +179,65 @@ export default function ProfilePage() {
               <label htmlFor="phone" className="mb-1.5 block text-sm font-medium text-foreground">
                 Phone number
               </label>
-              <input
-                id="phone"
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+919876543210"
-                className={INPUT_CLASS}
-              />
-              <p className="mt-1 text-xs text-muted">
-                Needed to sell tickets - buyers see it, marked as unverified. Include the country
-                code.
-              </p>
+              {isPhoneVerified ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface-raised px-4 py-3 text-foreground">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">{phone}</span>
+                    <VerifiedBadge />
+                  </span>
+                  {phoneOtpAvailable && !phoneClaimOpen && (
+                    <button
+                      type="button"
+                      onClick={() => setPhoneClaimOpen(true)}
+                      className="text-sm font-medium text-gold hover:text-gold-dim"
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <input
+                    id="phone"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+919876543210"
+                    className={INPUT_CLASS}
+                  />
+                  <p className="mt-1 text-xs text-muted">
+                    Needed to sell tickets - buyers see it, marked as unverified until you verify
+                    it. Include the country code.
+                  </p>
+                  {phoneOtpAvailable && !phoneClaimOpen && (
+                    <button
+                      type="button"
+                      onClick={() => setPhoneClaimOpen(true)}
+                      className="mt-1 text-sm font-medium text-gold hover:text-gold-dim"
+                    >
+                      Verify by text
+                    </button>
+                  )}
+                </>
+              )}
+              {phoneClaimOpen && (
+                <div className="mt-3">
+                  <p className="mb-2 text-xs text-muted">
+                    Your number is updated once you enter the code we text to it.
+                  </p>
+                  <IdentifierClaimForm
+                    channel="phone"
+                    initialValue={isPhoneVerified ? "" : phone}
+                    onDone={(updated) => {
+                      setPhone(updated.phone ?? "");
+                      setIsPhoneVerified(updated.isPhoneVerified);
+                      setPhoneClaimOpen(false);
+                    }}
+                  />
+                </div>
+              )}
               <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
                 <input
                   type="checkbox"
@@ -263,7 +316,8 @@ export default function ProfilePage() {
                         Your sign-in email switches once you enter the code sent to the new
                         address.
                       </p>
-                      <EmailClaimForm
+                      <IdentifierClaimForm
+                        channel="email"
                         onDone={(updated) => {
                           setEmail(updated.email ?? "");
                           setIsChangingEmail(false);

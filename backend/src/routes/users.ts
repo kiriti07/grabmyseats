@@ -15,9 +15,10 @@ import { getSellerDeliveryEligibility } from "../lib/sellerTrust";
 import { getRatingSummary } from "../lib/ratingSummary";
 import { getReferralSummary } from "../lib/referral";
 import { toSharedUser } from "../lib/serialize";
-import { normalizeLoginEmail, PHONE_RE } from "../lib/validators";
+import { normalizeLoginEmail, parseIdentifierInput, PHONE_RE } from "../lib/validators";
 import { APP_URL } from "../lib/config";
-import { emailProvider, sendOtpEmail } from "../lib/email";
+import { emailProvider } from "../lib/email";
+import { otpSendRefusal, sendOtp } from "../lib/otpDelivery";
 import {
   consumeEmailVerificationToken,
   issueEmailVerificationToken,
@@ -25,15 +26,16 @@ import {
 import { issueOtp, verifyOtp } from "../lib/otpStore";
 import {
   claimOtpIdentifier,
-  claimVerifiedEmail,
-  EmailOwnedByAnotherAccountError,
+  claimVerifiedIdentifier,
+  IdentifierOwnedByAnotherAccountError,
   isUniqueViolation,
-} from "../lib/emailIdentity";
+} from "../lib/identity";
 import {
-  otpEmailLimiter,
-  otpEmailDailyLimiter,
+  otpIdentifierLimiter,
+  otpIdentifierDailyLimiter,
   otpIpLimiter,
   otpGlobalLimiter,
+  otpVerifyLimiter,
 } from "../middleware/rateLimit";
 import { LIVE_LISTING_STATUSES } from "@grabmyseats/shared";
 
@@ -97,13 +99,13 @@ function requireNonEmptyString(value: unknown): string | null {
 // at all (omitted = unchanged, blank = clear), so a client built before
 // phone was editable here can't wipe it.
 //
-// A *verified* email is the login identity (lib/emailIdentity.ts) and
-// can't be changed here - that would leave the account with no way to log
-// in until the new address is verified. It goes through POST
-// /me/email/claim/request -> /claim/verify instead, which only switches
-// once the new address is proven. An unverified (or absent) email is still
-// a plain profile field here, verifiable later via POST
-// /me/email/send-verification.
+// A *verified* email or phone is a login identity (lib/identity.ts) and
+// can't be changed here - that could leave the account with no way to log
+// in until the new one is verified. It goes through POST
+// /me/identifiers/claim/request -> /claim/verify instead, which only
+// switches once the new one is proven. An unverified (or absent) email or
+// phone is still a plain profile field here (the email verifiable later
+// via POST /me/email/send-verification).
 usersRouter.patch("/me/profile", requireAuth, uploadProfileImage, async (req, res) => {
   const fullName = requireNonEmptyString(req.body?.fullName);
   const emailRaw = requireNonEmptyString(req.body?.email);
@@ -153,6 +155,15 @@ usersRouter.patch("/me/profile", requireAuth, uploadProfileImage, async (req, re
     const body: ApiResponse<never> = {
       success: false,
       error: "Your sign-in email can only be changed by confirming the new address",
+    };
+    res.status(409).json(body);
+    return;
+  }
+
+  if (phone !== undefined && phone !== req.user!.phone && req.user!.phoneVerifiedAt) {
+    const body: ApiResponse<never> = {
+      success: false,
+      error: "Your verified phone number can only be changed by confirming the new number",
     };
     res.status(409).json(body);
     return;
@@ -310,9 +321,9 @@ usersRouter.get("/me/email/verify", async (req, res) => {
   // cleared, and it's refused if another account already has it verified.
   let updated;
   try {
-    updated = await claimVerifiedEmail(user.id, user.email);
+    updated = await claimVerifiedIdentifier(user.id, "email", user.email);
   } catch (err) {
-    if (err instanceof EmailOwnedByAnotherAccountError || isUniqueViolation(err)) {
+    if (err instanceof IdentifierOwnedByAnotherAccountError || isUniqueViolation(err)) {
       const body: ApiResponse<never> = {
         success: false,
         error: "That email is already the sign-in email for another account",
@@ -332,74 +343,81 @@ usersRouter.get("/me/email/verify", async (req, res) => {
 
 const CLAIM_CODE_RE = /^\d{6}$/;
 
-// Step 1 of making an address this account's verified login identity -
-// used by the "add an email to keep access" banner (accounts with no
-// verified email) and by "Change email" on the profile page. Nothing is
-// written to the account until /claim/verify below proves ownership.
-// Same mail-relay protections as POST /api/auth/otp/request (layered rate
-// limits, fixed message body, send not awaited), and the same response
-// whatever the address - whether some other account holds it is only
-// revealed once the caller has proven they own it.
+// Step 1 of making an email or phone - { channel, identifier } - this
+// account's verified login identity: used by the "finish verifying"
+// banner on /account, the second-identifier step of /login/welcome, and
+// "Change" on the profile page. Nothing is written to the account until
+// /claim/verify below proves ownership. Same send protections as POST
+// /api/auth/otp/request (lib/otpDelivery.ts: layered rate limits, fixed
+// message body, send not awaited, SMS country allowlist), and the same
+// response whatever the identifier - whether some other account holds it
+// is only revealed once the caller has proven they own it.
 usersRouter.post(
-  "/me/email/claim/request",
+  "/me/identifiers/claim/request",
   requireAuth,
-  otpEmailLimiter,
-  otpEmailDailyLimiter,
+  otpIdentifierLimiter,
+  otpIdentifierDailyLimiter,
   otpIpLimiter,
   otpGlobalLimiter,
   async (req, res) => {
-    const email = normalizeLoginEmail(req.body?.email);
-    if (!email) {
-      const body: ApiResponse<never> = { success: false, error: "Enter a valid email address" };
+    const input = parseIdentifierInput(req.body);
+    const refusal = otpSendRefusal(input);
+    if (refusal) {
+      const body: ApiResponse<never> = { success: false, error: refusal };
       res.status(400).json(body);
       return;
     }
 
-    const code = await issueOtp(claimOtpIdentifier(req.user!.id, email));
-    sendOtpEmail(email, code).catch((err) => {
-      console.error("[users] failed to send add-email code", err);
-    });
+    const code = await issueOtp(claimOtpIdentifier(req.user!.id, input!.channel, input!.value));
+    sendOtp(input!, code, "users");
 
     const body: ApiResponse<{ message: string }> = {
       success: true,
-      data: { message: "If that address can receive email, a code is on its way" },
+      data: { message: "If that address or number can receive codes, one is on its way" },
     };
     res.json(body);
   },
 );
 
-// Step 2: the code proves ownership, so the address becomes this account's
-// verified email - replacing whatever email it had - and any other
-// account's unverified claim on it is cleared (lib/emailIdentity.ts's
-// claimVerifiedEmail). Refused if a different account already has it
+// Step 2: the code proves ownership, so the identifier becomes this
+// account's verified email/phone - replacing whatever it had - and any
+// other account's unverified claim on it is cleared (lib/identity.ts's
+// claimVerifiedIdentifier). Refused if a different account already has it
 // verified: that's an existing login identity, not something to take over.
-usersRouter.post("/me/email/claim/verify", requireAuth, async (req, res) => {
-  const email = normalizeLoginEmail(req.body?.email);
+// Never accepts the Play reviewer code (REVIEW_OTP) - that's login-only.
+usersRouter.post("/me/identifiers/claim/verify", requireAuth, otpVerifyLimiter, async (req, res) => {
+  const input = parseIdentifierInput(req.body);
   const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
-  if (!email || !CLAIM_CODE_RE.test(code)) {
-    const body: ApiResponse<never> = { success: false, error: "email and code are required" };
+  if (!input || !CLAIM_CODE_RE.test(code)) {
+    const body: ApiResponse<never> = {
+      success: false,
+      error: "identifier and code are required",
+    };
     res.status(400).json(body);
     return;
   }
 
-  if (!(await verifyOtp(claimOtpIdentifier(req.user!.id, email), code))) {
+  if (!(await verifyOtp(claimOtpIdentifier(req.user!.id, input.channel, input.value), code))) {
     const body: ApiResponse<never> = { success: false, error: "Invalid or expired code" };
     res.status(401).json(body);
     return;
   }
 
   try {
-    const updated = await claimVerifiedEmail(req.user!.id, email);
+    const updated = await claimVerifiedIdentifier(req.user!.id, input.channel, input.value);
     const body: ApiResponse<{ user: SharedUser }> = {
       success: true,
       data: { user: toSharedUser(updated) },
     };
     res.json(body);
   } catch (err) {
-    if (err instanceof EmailOwnedByAnotherAccountError || isUniqueViolation(err)) {
+    if (err instanceof IdentifierOwnedByAnotherAccountError || isUniqueViolation(err)) {
       const body: ApiResponse<never> = {
         success: false,
-        error: "That email is already the sign-in email for another account",
+        error:
+          input.channel === "email"
+            ? "That email is already the sign-in email for another account"
+            : "That phone number is already verified on another account",
       };
       res.status(409).json(body);
       return;

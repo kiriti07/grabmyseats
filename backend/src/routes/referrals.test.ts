@@ -5,7 +5,7 @@ import request from "supertest";
 import { app } from "../app";
 import { prisma } from "../lib/prisma";
 import { issueOtp } from "../lib/otpStore";
-import { loginOtpIdentifier } from "../lib/emailIdentity";
+import { loginOtpIdentifier } from "../lib/identity";
 import { issueSessionToken } from "../lib/session";
 import { REFERRAL_MILESTONE_INTERVAL, REFERRAL_MILESTONE_POINTS } from "../lib/referral";
 
@@ -44,8 +44,9 @@ describe("referrals", () => {
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   });
 
-  // verifiedEmail makes the user loggable-in by that address (see
-  // lib/emailIdentity.ts - only a verified email is a login identity).
+  // Every user gets a verified email - listing/reserving require one (see
+  // lib/verificationGate.ts), and it's what logs them in (lib/identity.ts).
+  // verifiedEmail picks the address, for tests that log in with it.
   async function createUser(label: string, referralCode?: string, verifiedEmail?: string) {
     const suffix = randomUUID();
     const user = await prisma.user.create({
@@ -53,7 +54,8 @@ describe("referrals", () => {
         phone: `+1555ref${label}${suffix}`.slice(0, 30),
         name: `Referral Test ${label}`,
         ...(referralCode ? { referralCode } : {}),
-        ...(verifiedEmail ? { email: verifiedEmail, emailVerifiedAt: new Date() } : {}),
+        email: verifiedEmail ?? randomEmail(),
+        emailVerifiedAt: new Date(),
       },
     });
     userIds.push(user.id);
@@ -65,7 +67,7 @@ describe("referrals", () => {
   // A brand-new account has no phone, which selling requires (POST
   // /api/listings), so one is added directly - not what's under test here.
   async function verifyOtp(email: string, ref?: string) {
-    const code = await issueOtp(loginOtpIdentifier(email));
+    const code = await issueOtp(loginOtpIdentifier("email", email));
     const res = await request(app)
       .post("/api/auth/otp/verify")
       .send({ email, code, ...(ref ? { ref } : {}) });
@@ -253,7 +255,7 @@ describe("referrals", () => {
     const email = randomEmail();
     const existing = await createUser("existing-login", undefined, email);
 
-    const code = await issueOtp(loginOtpIdentifier(email));
+    const code = await issueOtp(loginOtpIdentifier("email", email));
     const res = await request(app).post("/api/auth/otp/verify").send({ email, code });
     expect(res.status).toBe(200);
 
@@ -266,7 +268,7 @@ describe("referrals", () => {
     const email = randomEmail();
     const existing = await createUser("late-ref-existing", undefined, email);
 
-    const code = await issueOtp(loginOtpIdentifier(email));
+    const code = await issueOtp(loginOtpIdentifier("email", email));
     const res = await request(app)
       .post("/api/auth/otp/verify")
       .send({ email, code, ref: "REFLATEAPPLY" });
@@ -275,5 +277,99 @@ describe("referrals", () => {
     const afterLogin = await prisma.user.findUniqueOrThrow({ where: { id: existing.id } });
     expect(afterLogin.referredByUserId).toBeNull();
     expect((await getReferrals(referrer.token)).referredCount).toBe(0);
+  });
+  describe("referral links through the sign-in / sign-up split", () => {
+    function randomIndianPhone(): string {
+      return `+91${Math.floor(6_000_000_000 + Math.random() * 3_999_999_999)}`;
+    }
+
+    it("a phone sign-up with ?ref= credits the referrer", async () => {
+      await createUser("phone-referrer", "REFPHONESIGNUP");
+      const phone = randomIndianPhone();
+      const code = await issueOtp(loginOtpIdentifier("phone", phone));
+
+      const res = await request(app)
+        .post("/api/auth/otp/verify")
+        .send({
+          channel: "phone",
+          identifier: phone,
+          code,
+          intent: "signup",
+          ref: "REFPHONESIGNUP",
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.data.isNewAccount).toBe(true);
+      userIds.push(res.body.data.user.id);
+
+      const created = await prisma.user.findUniqueOrThrow({
+        where: { id: res.body.data.user.id },
+      });
+      const referrer = await prisma.user.findUniqueOrThrow({
+        where: { referralCode: "REFPHONESIGNUP" },
+      });
+      expect(created.referredByUserId).toBe(referrer.id);
+      expect(created.phoneVerifiedAt).not.toBeNull();
+    });
+
+    it("sign-in with no account -> 'create one?' -> confirm, carrying ?ref=, credits the referrer", async () => {
+      await createUser("confirm-referrer", "REFSIGNINCONFIRM");
+      const email = randomEmail();
+      const code = await issueOtp(loginOtpIdentifier("email", email));
+
+      const verify = await request(app)
+        .post("/api/auth/otp/verify")
+        .send({ channel: "email", identifier: email, code, intent: "signin" });
+      expect(verify.status).toBe(200);
+      expect(verify.body.data.noAccount).toBe(true);
+      // Nothing is created by the sign-in itself.
+      expect(await prisma.user.count({ where: { email } })).toBe(0);
+
+      const confirm = await request(app)
+        .post("/api/auth/signup/confirm")
+        .send({ signupToken: verify.body.data.signupToken, ref: "REFSIGNINCONFIRM" });
+      expect(confirm.status).toBe(200);
+      expect(confirm.body.data.isNewAccount).toBe(true);
+      userIds.push(confirm.body.data.user.id);
+
+      const created = await prisma.user.findUniqueOrThrow({
+        where: { id: confirm.body.data.user.id },
+      });
+      const referrer = await prisma.user.findUniqueOrThrow({
+        where: { referralCode: "REFSIGNINCONFIRM" },
+      });
+      expect(created.referredByUserId).toBe(referrer.id);
+      expect(created.email).toBe(email);
+      expect(created.emailVerifiedAt).not.toBeNull();
+
+      // The token is single-use.
+      const replay = await request(app)
+        .post("/api/auth/signup/confirm")
+        .send({ signupToken: verify.body.data.signupToken });
+      expect(replay.status).toBe(401);
+    });
+
+    it("?ref= on a sign-in for an existing account is ignored", async () => {
+      const referrer = await createUser("signin-referrer", "REFSIGNINEXISTING");
+      const email = randomEmail();
+      const existing = await createUser("signin-existing", undefined, email);
+      const code = await issueOtp(loginOtpIdentifier("email", email));
+
+      const res = await request(app)
+        .post("/api/auth/otp/verify")
+        .send({
+          channel: "email",
+          identifier: email,
+          code,
+          intent: "signin",
+          ref: "REFSIGNINEXISTING",
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.data.isNewAccount).toBe(false);
+      expect(res.body.data.user.id).toBe(existing.id);
+
+      const after = await prisma.user.findUniqueOrThrow({ where: { id: existing.id } });
+      expect(after.referredByUserId).toBeNull();
+      expect((await getReferrals(referrer.token)).referredCount).toBe(0);
+    });
   });
 });

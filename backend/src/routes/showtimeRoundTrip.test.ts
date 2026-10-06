@@ -46,7 +46,12 @@ describe("showtime round-trips exactly, with no timezone drift", () => {
   beforeAll(async () => {
     const suffix = randomUUID();
     const seller = await prisma.user.create({
-      data: { phone: `+1555showtime${suffix}`.slice(0, 30), name: "Test Seller" },
+      data: {
+        phone: `+1555showtime${suffix}`.slice(0, 30),
+        email: `showtime-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+        name: "Test Seller",
+      },
     });
     sellerId = seller.id;
     sellerToken = await issueSessionToken(seller);

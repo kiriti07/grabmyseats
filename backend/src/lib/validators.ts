@@ -36,3 +36,35 @@ export function emailRateLimitKey(email: string): string {
 // Strict E.164 ("+<countrycode><digits>", no spaces/formatting) - phone is
 // rendered straight into tel: and wa.me links at contact reveal.
 export const PHONE_RE = /^\+[1-9]\d{7,14}$/;
+
+// Canonical stored/lookup form of a phone used as a login identity: E.164
+// after dropping the spaces, dashes and parentheses people type. Unlike
+// email there's no case to fold, so stored phones match exactly.
+export function normalizeLoginPhone(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const phone = value.trim().replace(/[\s\-()]/g, "");
+  return PHONE_RE.test(phone) ? phone : null;
+}
+
+export function isPhoneCountryAllowed(phone: string, countryCodes: string[]): boolean {
+  return countryCodes.some((cc) => phone.startsWith(`+${cc}`));
+}
+
+export type IdentifierChannel = "email" | "phone";
+
+export interface IdentifierInput {
+  channel: IdentifierChannel;
+  value: string;
+}
+
+// Reads { channel, identifier } off an OTP request body, normalized for its
+// channel. A body with no channel/identifier but an `email` field - the
+// shape every client sent before phone OTP existed - reads as an email
+// identifier, so those keep working unchanged.
+export function parseIdentifierInput(body: unknown): IdentifierInput | null {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const channel: IdentifierChannel = b.channel === "phone" ? "phone" : "email";
+  const raw = b.identifier ?? (channel === "email" ? b.email : b.phone);
+  const value = channel === "email" ? normalizeLoginEmail(raw) : normalizeLoginPhone(raw);
+  return value ? { channel, value } : null;
+}

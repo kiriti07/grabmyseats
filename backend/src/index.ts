@@ -3,6 +3,9 @@ import { app } from "./app";
 import { startJobs } from "./jobs";
 import { PAYMENT_MODE } from "./lib/config";
 import { emailProviderName } from "./lib/email";
+import { smsProviderName } from "./lib/sms";
+import { requirePhoneVerification } from "./lib/config";
+import { checkReviewLoginConfigAtStartup } from "./lib/reviewAccess";
 
 // Fails loud instead of silently ignoring a leftover dev-only env var that
 // would otherwise let anyone sign in as any email address in production.
@@ -21,6 +24,23 @@ console.log(`[config] PAYMENT_MODE=${PAYMENT_MODE}`);
 // no one can actually receive a login code - loud in production, but not
 // fatal, so a misconfigured SMTP setting doesn't take the whole API down.
 console.log(`[config] EMAIL_PROVIDER=${emailProviderName}`);
+console.log(`[config] SMS_PROVIDER=${smsProviderName}`);
+console.log(`[config] REQUIRE_PHONE_VERIFICATION=${requirePhoneVerification()}`);
+if (
+  requirePhoneVerification() &&
+  smsProviderName === "console" &&
+  process.env.NODE_ENV === "production"
+) {
+  console.warn(
+    "[config] WARNING: REQUIRE_PHONE_VERIFICATION=true but SMS is console-only - nobody can " +
+      "verify a phone, so nobody can list or reserve until a real SMS provider is configured.",
+  );
+}
+
+// Play reviewer login (lib/reviewAccess.ts) - separate from, and not
+// affected by, the DEV_OTP_BYPASS_CODE production guard above. Logs loudly
+// when enabled; refuses to boot on a malformed/guessable REVIEW_OTP.
+checkReviewLoginConfigAtStartup();
 if (process.env.NODE_ENV === "production" && emailProviderName === "console") {
   console.warn(
     "[config] WARNING: SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS are not all set - login codes " +

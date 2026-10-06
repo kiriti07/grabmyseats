@@ -28,8 +28,10 @@ describe("matchAlerts", () => {
     const seller = await prisma.user.create({
       data: { phone: `+1555masseller${suffix}`.slice(0, 30) },
     });
+    // Alert SMS only ever go to a verified phone - see the
+    // unverified-phone case at the bottom of this file.
     const buyer = await prisma.user.create({
-      data: { phone: `+1555masbuyer${suffix}`.slice(0, 30) },
+      data: { phone: `+1555masbuyer${suffix}`.slice(0, 30), phoneVerifiedAt: new Date() },
     });
     sellerId = seller.id;
     buyerId = buyer.id;
@@ -47,10 +49,11 @@ describe("matchAlerts", () => {
     movieName: string;
     category?: "MOVIE" | "EVENT" | "SPORT";
     theaterLat?: number;
+    sellerId?: string;
   }) {
     const listing = await prisma.listing.create({
       data: {
-        sellerId,
+        sellerId: overrides.sellerId ?? sellerId,
         category: overrides.category ?? "MOVIE",
         movieName: overrides.movieName,
         theaterName: "Match Alerts Test Theater",
@@ -207,5 +210,42 @@ describe("matchAlerts", () => {
       include: { alert: { include: { user: true } } },
     });
     expect(notification?.alert.user.phone).toBe(buyerPhone);
+  });
+
+  it("never texts an unverified (self-reported) phone", async () => {
+    await prisma.user.update({ where: { id: buyerId }, data: { phoneVerifiedAt: null } });
+    try {
+      const alert = await createAlert({ titleQuery: "Kalki" });
+      const listing = await createListing({ movieName: "Kalki" });
+
+      await matchAlerts();
+
+      const notification = await prisma.alertNotification.findUnique({
+        where: { alertId_listingId: { alertId: alert.id, listingId: listing.id } },
+      });
+      expect(notification).toBeNull();
+    } finally {
+      await prisma.user.update({ where: { id: buyerId }, data: { phoneVerifiedAt: new Date() } });
+    }
+  });
+
+  it("never alerts on the Play review account's listings", async () => {
+    const reviewer = await prisma.user.create({
+      data: { email: `reviewer-${randomUUID()}@example.com`, isReviewAccount: true },
+    });
+    try {
+      const alert = await createAlert({ titleQuery: "Devara" });
+      const listing = await createListing({ movieName: "Devara", sellerId: reviewer.id });
+
+      await matchAlerts();
+
+      const notification = await prisma.alertNotification.findUnique({
+        where: { alertId_listingId: { alertId: alert.id, listingId: listing.id } },
+      });
+      expect(notification).toBeNull();
+    } finally {
+      await prisma.listing.deleteMany({ where: { sellerId: reviewer.id } });
+      await prisma.user.delete({ where: { id: reviewer.id } });
+    }
   });
 });

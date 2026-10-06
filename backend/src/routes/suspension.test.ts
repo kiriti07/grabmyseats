@@ -6,7 +6,7 @@ import { app } from "../app";
 import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
 import { issueOtp } from "../lib/otpStore";
-import { loginOtpIdentifier } from "../lib/emailIdentity";
+import { loginOtpIdentifier } from "../lib/identity";
 
 // End-to-end coverage for suspension enforcement, against the real local
 // Postgres through the actual Express app - not mocked: requireAuth
@@ -38,8 +38,14 @@ describe("suspension", () => {
         name: "Suspended Seller",
       },
     });
+    // Verified email: reserving and viewing contact require one (see
+    // lib/verificationGate.ts) - this suite is about suspension, not that.
     const buyer = await prisma.user.create({
-      data: { phone: `+1555suspbuyer${suffix}`.slice(0, 30) },
+      data: {
+        phone: `+1555suspbuyer${suffix}`.slice(0, 30),
+        email: `susp-buyer-${suffix}@example.com`,
+        emailVerifiedAt: new Date(),
+      },
     });
     sellerId = seller.id;
     sellerToken = await issueSessionToken(seller);
@@ -110,7 +116,7 @@ describe("suspension", () => {
   });
 
   it("login (OTP verify) refuses a suspended user", async () => {
-    const code = await issueOtp(loginOtpIdentifier(sellerEmail));
+    const code = await issueOtp(loginOtpIdentifier("email", sellerEmail));
     const res = await request(app).post("/api/auth/otp/verify").send({ email: sellerEmail, code });
     expect(res.status).toBe(403);
     expect(res.body.error).toContain("suspended");

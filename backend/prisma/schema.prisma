@@ -23,11 +23,21 @@ datasource db {
 
 model User {
   id                String        @id @default(cuid())
-  // Self-reported and unverified - email (below, once verified) is the
-  // login identity. Nullable: accounts created by email-OTP login have
-  // none until they add one, which they must before selling (POST
+  // A login identity once verified (phoneVerifiedAt below), same as email -
+  // see src/lib/identity.ts. Nullable: email-signup accounts have none
+  // until they add one, which they must before selling (POST
   // /api/listings). Still unique - Postgres allows any number of NULLs.
   phone             String?       @unique
+  // Set when the user proves they own `phone` by SMS code (phone sign-in/
+  // sign-up, or POST /api/users/me/identifiers/claim/verify). Required for
+  // listing/reserving/contact only when REQUIRE_PHONE_VERIFICATION=true -
+  // see src/lib/verificationGate.ts.
+  phoneVerifiedAt   DateTime?
+  // Marks the single account the Play reviewer login (REVIEW_EMAIL/
+  // REVIEW_OTP - see src/lib/reviewAccess.ts) signs into. Grants nothing on
+  // its own: the account only counts as verified while both env vars are
+  // set and its email matches. Its listings are never shown to anyone else.
+  isReviewAccount   Boolean       @default(false)
   name              String?
   trustScore        Int           @default(100)
   strikes           Int           @default(0)
@@ -71,7 +81,7 @@ model User {
   // changed (a verified one can't be changed there), so this can never
   // point at an address the user no longer has on file. isVerified
   // (toSharedUser) derives straight from this plus email being non-null.
-  // Phone has no equivalent flag - it's never verified.
+  // Phone's equivalent is phoneVerifiedAt above.
   emailVerifiedAt DateTime?
 
   // Set together by POST /api/admin/users/:id/suspend (or POST

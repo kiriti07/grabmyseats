@@ -1,33 +1,35 @@
 "use client";
 
 import { useState } from "react";
-import type { User } from "@grabmyseats/shared";
+import type { IdentifierChannel, User } from "@grabmyseats/shared";
 import { OtpInput } from "@/components/auth/OtpInput";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { INPUT_CLASS } from "@/lib/styles";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError, requestEmailClaimCode, verifyEmailClaimCode } from "@/lib/api";
+import { normalizeIdentifier } from "@/lib/identifier";
+import { ApiError, requestIdentifierClaimCode, verifyIdentifierClaimCode } from "@/lib/api";
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// Two steps - address, then the 6-digit code emailed to it - and nothing
-// changes on the account until the code is redeemed (POST
-// /api/users/me/email/claim/verify), so the address only ever becomes this
-// account's sign-in email once it's proven. Used by AddEmailBanner on
-// /account and by "Change" next to the sign-in email on /account/profile.
+// Two steps - an email or phone, then the 6-digit code sent to it - and
+// nothing changes on the account until the code is redeemed (POST
+// /api/users/me/identifiers/claim/verify), so it only ever becomes this
+// account's verified email/phone once it's proven. Used by
+// VerifyIdentityBanner on /account, the second-identifier step of
+// /login/welcome, and "Change"/"Verify" on /account/profile.
 // Deliberately no <form> and only type="button" buttons: on the profile
 // page this renders inside that page's own form, and must neither nest a
 // form nor submit the outer one.
-export function EmailClaimForm({
-  initialEmail = "",
+export function IdentifierClaimForm({
+  channel,
+  initialValue = "",
   onDone,
 }: {
-  initialEmail?: string;
+  channel: IdentifierChannel;
+  initialValue?: string;
   onDone?: (user: User) => void;
 }) {
   const { updateUser } = useAuth();
-  const [email, setEmail] = useState(initialEmail);
+  const [value, setValue] = useState(initialValue);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [otpKey, setOtpKey] = useState(0);
@@ -36,15 +38,19 @@ export function EmailClaimForm({
 
   async function handleSend() {
     setError(null);
-    const trimmed = email.trim().toLowerCase();
-    if (!EMAIL_RE.test(trimmed)) {
-      setError("Enter a valid email address");
+    const identifier = normalizeIdentifier(channel, value);
+    if (!identifier) {
+      setError(
+        channel === "email"
+          ? "Enter a valid email address"
+          : "Enter your phone number with country code, e.g. +919876543210",
+      );
       return;
     }
     setIsBusy(true);
     try {
-      await requestEmailClaimCode(trimmed);
-      setSentTo(trimmed);
+      await requestIdentifierClaimCode(channel, identifier);
+      setSentTo(identifier);
       setCode("");
       setOtpKey((k) => k + 1);
     } catch (err) {
@@ -63,7 +69,7 @@ export function EmailClaimForm({
     }
     setIsBusy(true);
     try {
-      const { user } = await verifyEmailClaimCode(sentTo, code);
+      const { user } = await verifyIdentifierClaimCode(channel, sentTo, code);
       updateUser(user);
       onDone?.(user);
     } catch (err) {
@@ -76,17 +82,18 @@ export function EmailClaimForm({
     return (
       <div>
         <input
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          type={channel === "email" ? "email" : "tel"}
+          inputMode={channel === "email" ? "email" : "tel"}
+          autoComplete={channel === "email" ? "email" : "tel"}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
               handleSend();
             }
           }}
-          placeholder="you@example.com"
+          placeholder={channel === "email" ? "you@example.com" : "+919876543210"}
           className={INPUT_CLASS}
         />
         <ErrorText>{error}</ErrorText>
@@ -111,7 +118,7 @@ export function EmailClaimForm({
           }}
           className="font-medium text-gold hover:text-gold-dim"
         >
-          Change address
+          {channel === "email" ? "Change address" : "Change number"}
         </button>
       </p>
       <OtpInput key={otpKey} onChange={setCode} disabled={isBusy} hasError={!!error} />

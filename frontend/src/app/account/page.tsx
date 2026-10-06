@@ -7,7 +7,7 @@ import type { ReferralSummary } from "@grabmyseats/shared";
 import { useAuth } from "@/context/AuthContext";
 import { fetchMyReferrals } from "@/lib/api";
 import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
-import { AddEmailBanner } from "@/components/account/AddEmailBanner";
+import { VerifyIdentityBanner } from "@/components/account/VerifyIdentityBanner";
 
 // A protected route example: src/middleware.ts redirects here-bound
 // requests to /login when there's no session cookie at all. This
@@ -42,13 +42,12 @@ export default function AccountPage() {
       .catch(() => setReferrals(null));
   }, [isAuthenticated]);
 
-  // /login?ref=<code> (see backend's POST /api/auth/otp/verify, and
-  // /login's own ?ref= handling) once referral data has loaded; falls
-  // back to the plain app link before that, or if it never loads. There's
-  // no separate /signup page - /login already handles both new and
-  // returning users via email OTP.
+  // /signup?ref=<code> (see backend's POST /api/auth/otp/verify, which only
+  // ever applies a ref to a newly created account) once referral data has
+  // loaded; falls back to the plain app link before that, or if it never
+  // loads. Older /login?ref= links still work - /login forwards them here.
   const referralLink =
-    referrals && origin ? `${origin}/login?ref=${referrals.referralCode}` : origin;
+    referrals && origin ? `${origin}/signup?ref=${referrals.referralCode}` : origin;
 
   // Native share sheet where available (mobile browsers, mostly); falls
   // back to copying the link when navigator.share isn't supported (most
@@ -117,12 +116,16 @@ export default function AccountPage() {
               <VerifiedBadge />
             </p>
           )}
-          {user.phone && <p className="text-sm">{user.phone}</p>}
+          {user.phone && (
+            <p className="flex items-center gap-2 text-sm">
+              {user.phone}
+              {user.isPhoneVerified && <VerifiedBadge />}
+            </p>
+          )}
         </div>
 
-        {/* No verified email = no way to sign back in once this session
-            ends (only a verified email is a login identity). */}
-        {!user.isVerified && <AddEmailBanner user={user} />}
+        {/* Anything still unverified - see useVerificationGaps. */}
+        <VerifyIdentityBanner user={user} />
 
         <div className="flex w-full max-w-xs flex-col gap-2">
           <Link

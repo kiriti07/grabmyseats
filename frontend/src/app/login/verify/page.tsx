@@ -3,12 +3,13 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import type { IdentifierChannel, User } from "@grabmyseats/shared";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { OtpInput } from "@/components/auth/OtpInput";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError, requestOtp, verifyOtpCode } from "@/lib/api";
+import { ApiError, confirmSignup, requestOtp, verifyOtpCode } from "@/lib/api";
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -21,14 +22,23 @@ function safeNextPath(next: string | null): string {
   return "/";
 }
 
+// Step 2 of /login and /signup (IdentifierAuth): enter the code. A verified
+// code logs into the account that has this email/phone verified, whichever
+// page the user came from. With no such account, sign-up creates one right
+// away; sign-in creates nothing and asks "create an account?" first.
 function VerifyForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { login } = useAuth();
-  const email = searchParams.get("email") ?? "";
+  // ?email= is what links into this page looked like before phone sign-in.
+  const legacyEmail = searchParams.get("email");
+  const channel: IdentifierChannel =
+    !legacyEmail && searchParams.get("channel") === "phone" ? "phone" : "email";
+  const identifier = searchParams.get("identifier") ?? legacyEmail ?? "";
+  const intent = searchParams.get("intent") === "signin" ? "signin" : "signup";
   const next = safeNextPath(searchParams.get("next"));
-  // Forwarded from /login - see that page's own comment. Only reaches the
-  // backend as part of THIS verify call, never a later login.
+  // Forwarded from /signup (or a /login that turns into a sign-up below).
+  // Only reaches the backend when an account is actually created.
   const ref = searchParams.get("ref");
 
   const [code, setCode] = useState("");
@@ -38,12 +48,14 @@ function VerifyForm() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(RESEND_COOLDOWN_SECONDS);
+  const [signupToken, setSignupToken] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
-    if (!email) {
+    if (!identifier) {
       router.replace("/login");
     }
-  }, [email, router]);
+  }, [identifier, router]);
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -52,6 +64,17 @@ function VerifyForm() {
     }, 1000);
     return () => clearInterval(timer);
   }, [secondsLeft]);
+
+  function finish(user: User, token: string, isNewAccount: boolean) {
+    login(token, user);
+    if (isNewAccount) {
+      // Referral linking (if any) already happened server-side - welcome
+      // just has to carry `next` one step further.
+      router.replace(`/login/welcome?next=${encodeURIComponent(next)}`);
+    } else {
+      router.replace(next);
+    }
+  }
 
   async function handleVerify() {
     setError(null);
@@ -62,22 +85,35 @@ function VerifyForm() {
 
     setIsVerifying(true);
     try {
-      const { user, token, isNewAccount } = await verifyOtpCode(email, code, ref ?? undefined);
-      login(token, user);
-      if (isNewAccount) {
-        // Referral linking (if any) already happened inside the verify
-        // call above - this step never needs the ref code itself, just
-        // has to carry `next` one step further so the eventual redirect
-        // still lands where the visitor was originally headed. A
-        // returning user (isNewAccount: false) skips straight to `next`,
-        // exactly as before.
-        router.replace(`/login/welcome?next=${encodeURIComponent(next)}`);
-      } else {
-        router.replace(next);
+      const result = await verifyOtpCode({
+        channel,
+        identifier,
+        code,
+        intent,
+        ...(ref ? { ref } : {}),
+      });
+      if ("noAccount" in result) {
+        setSignupToken(result.signupToken);
+        setIsVerifying(false);
+        return;
       }
+      finish(result.user, result.token, result.isNewAccount);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
       setIsVerifying(false);
+    }
+  }
+
+  async function handleCreateAccount() {
+    if (!signupToken) return;
+    setError(null);
+    setIsCreating(true);
+    try {
+      const { user, token, isNewAccount } = await confirmSignup(signupToken, ref ?? undefined);
+      finish(user, token, isNewAccount);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
+      setIsCreating(false);
     }
   }
 
@@ -86,7 +122,7 @@ function VerifyForm() {
     setNotice(null);
     setIsResending(true);
     try {
-      await requestOtp(email);
+      await requestOtp(channel, identifier);
       setSecondsLeft(RESEND_COOLDOWN_SECONDS);
       setOtpKey((k) => k + 1);
       setCode("");
@@ -98,23 +134,45 @@ function VerifyForm() {
     }
   }
 
+  const backHref = (() => {
+    const params = new URLSearchParams();
+    if (next !== "/") params.set("next", next);
+    if (ref) params.set("ref", ref);
+    const query = params.toString();
+    const base = intent === "signin" ? "/login" : "/signup";
+    return query ? `${base}?${query}` : base;
+  })();
+
+  // Only reachable after the code was verified, so saying there's no
+  // account here reveals nothing to anyone who doesn't own the identifier.
+  if (signupToken) {
+    return (
+      <AuthShell title="No account yet" subtitle={`There's no GrabMySeats account for ${identifier}.`}>
+        <Button onClick={handleCreateAccount} isLoading={isCreating}>
+          {isCreating ? "Creating..." : "Create an account"}
+        </Button>
+        <ErrorText>{error}</ErrorText>
+        <p className="mt-5 text-center text-sm text-muted">
+          <Link href={backHref} className="font-medium text-gold hover:text-gold-dim">
+            Use a different {channel === "email" ? "email" : "number"}
+          </Link>
+        </p>
+      </AuthShell>
+    );
+  }
+
   return (
     <AuthShell
       title="Enter the code"
-      subtitle={`If ${email || "that address"} can receive email, we've sent it a 6-digit code. Check your spam folder too.`}
+      subtitle={
+        channel === "email"
+          ? `If ${identifier || "that address"} can receive email, we've sent it a 6-digit code. Check your spam folder too.`
+          : `If ${identifier || "that number"} can receive texts, we've sent it a 6-digit code.`
+      }
     >
       <div className="mb-4 flex items-center justify-center gap-2 text-sm text-muted">
-        <span className="truncate">{email}</span>
-        <Link
-          href={(() => {
-            const params = new URLSearchParams();
-            if (next !== "/") params.set("next", next);
-            if (ref) params.set("ref", ref);
-            const query = params.toString();
-            return query ? `/login?${query}` : "/login";
-          })()}
-          className="font-medium text-gold hover:text-gold-dim"
-        >
+        <span className="truncate">{identifier}</span>
+        <Link href={backHref} className="font-medium text-gold hover:text-gold-dim">
           edit
         </Link>
       </div>

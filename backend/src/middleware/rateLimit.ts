@@ -3,7 +3,7 @@ import { RedisStore } from "rate-limit-redis";
 import type { Request, Response } from "express";
 import type { ApiResponse } from "@grabmyseats/shared";
 import { redis } from "../lib/redis";
-import { emailRateLimitKey, normalizeLoginEmail } from "../lib/validators";
+import { emailRateLimitKey, parseIdentifierInput } from "../lib/validators";
 
 function sendCommand(...args: string[]) {
   const [command, ...rest] = args;
@@ -35,12 +35,12 @@ export const otpPhoneLimiter = rateLimit({
   },
 });
 
-// Email OTP limits (POST /api/auth/otp/request, POST
-// /api/users/me/email/claim/request). Every one of these sends mail from
-// our domain to an address the caller chose, so they're layered: per
-// inbox (short and daily windows), per IP (otpIpLimiter below), and a
-// global ceiling. All share one 429 message that never says anything about
-// whether an account exists for the address.
+// OTP limits (POST /api/auth/otp/request, POST
+// /api/users/me/identifiers/claim/request). Every one of these sends an
+// email or SMS from us to an address/number the caller chose, so they're
+// layered: per identifier (short and daily windows), per IP (otpIpLimiter
+// below), and a global ceiling per channel. All share one 429 message that
+// never says anything about whether an account exists.
 function sendOtpRateLimited(_req: Request, res: Response): void {
   const body: ApiResponse<never> = {
     success: false,
@@ -49,48 +49,76 @@ function sendOtpRateLimited(_req: Request, res: Response): void {
   res.status(429).json(body);
 }
 
-// Keyed on the "+tag"-stripped address (see emailRateLimitKey), so plus
-// aliases of one inbox share a budget. Invalid emails fall back to the IP -
-// the route 400s them anyway, but they still count.
-function emailKey(req: Request): string {
-  const email = normalizeLoginEmail(req.body?.email);
-  return email ? emailRateLimitKey(email) : ipKeyGenerator(req.ip ?? "unknown");
+// Emails key on the "+tag"-stripped address (see emailRateLimitKey), so
+// plus aliases of one inbox share a budget; phones on their E.164 form.
+// The per-identifier limiters skip invalid input entirely (the route 400s
+// it, and the per-IP limiter still counts it) - keying it on the IP here
+// would let a few typos lock a whole network out of every identifier.
+function identifierKey(req: Request): string {
+  const input = parseIdentifierInput(req.body);
+  if (!input) return `ip:${ipKeyGenerator(req.ip ?? "unknown")}`;
+  return input.channel === "email"
+    ? `email:${emailRateLimitKey(input.value)}`
+    : `phone:${input.value}`;
 }
 
-// Max 3 email OTPs per inbox per 10 minutes, and 10 per day - the daily
+function hasNoIdentifier(req: Request): boolean {
+  return parseIdentifierInput(req.body) === null;
+}
+
+// Max 3 OTPs per identifier per 10 minutes, and 10 per day - the daily
 // cap stops a slow drip at one victim that stays under the short window.
-export const otpEmailLimiter = rateLimit({
+export const otpIdentifierLimiter = rateLimit({
   windowMs: 10 * MINUTE,
   limit: 3,
   standardHeaders: true,
   legacyHeaders: false,
-  store: new RedisStore({ sendCommand, prefix: "rl:otp-email:" }),
-  keyGenerator: emailKey,
+  store: new RedisStore({ sendCommand, prefix: "rl:otp-id:" }),
+  keyGenerator: identifierKey,
+  skip: hasNoIdentifier,
   handler: sendOtpRateLimited,
 });
 
-export const otpEmailDailyLimiter = rateLimit({
+export const otpIdentifierDailyLimiter = rateLimit({
   windowMs: DAY,
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  store: new RedisStore({ sendCommand, prefix: "rl:otp-email-day:" }),
-  keyGenerator: emailKey,
+  store: new RedisStore({ sendCommand, prefix: "rl:otp-id-day:" }),
+  keyGenerator: identifierKey,
+  skip: hasNoIdentifier,
   handler: sendOtpRateLimited,
 });
 
-// Circuit breaker across all callers: no more than 300 OTP emails an hour
-// in total, however many IPs/addresses they're spread over. Well above
-// normal sign-in volume; hitting it means something is abusing the
-// endpoint, and the right failure is "nobody gets mail for a bit", not
+// Circuit breaker across all callers, per channel: no more than 300 OTP
+// emails or 100 OTP SMS an hour in total, however many IPs/identifiers
+// they're spread over. SMS is lower because every one costs money. Well
+// above normal sign-in volume; hitting it means something is abusing the
+// endpoint, and the right failure is "nobody gets a code for a bit", not
 // "we keep sending".
 export const otpGlobalLimiter = rateLimit({
   windowMs: HOUR,
-  limit: 300,
+  limit: (req) => (parseIdentifierInput(req.body)?.channel === "phone" ? 100 : 300),
   standardHeaders: false,
   legacyHeaders: false,
   store: new RedisStore({ sendCommand, prefix: "rl:otp-global:" }),
-  keyGenerator: () => "all",
+  keyGenerator: (req) => parseIdentifierInput(req.body)?.channel ?? "email",
+  handler: sendOtpRateLimited,
+});
+
+// Max 10 code *checks* per identifier per hour (POST /api/auth/otp/verify,
+// POST /api/users/me/identifiers/claim/verify). A normal code dies on its
+// first wrong guess anyway, but the Play reviewer code (REVIEW_OTP - see
+// lib/reviewAccess.ts) is fixed, so without this its 1,000,000 possible
+// values could simply be tried in turn.
+export const otpVerifyLimiter = rateLimit({
+  windowMs: HOUR,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new RedisStore({ sendCommand, prefix: "rl:otp-verify:" }),
+  keyGenerator: identifierKey,
+  skip: hasNoIdentifier,
   handler: sendOtpRateLimited,
 });
 

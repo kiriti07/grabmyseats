@@ -27,13 +27,26 @@ describe("listing view tracking", () => {
   beforeAll(async () => {
     const suffix = randomUUID();
     const seller = await prisma.user.create({
-      data: { phone: `+1555countseller${suffix}`.slice(0, 30), name: "Count Test Seller" },
+      data: {
+        phone: `+1555countseller${suffix}`.slice(0, 30),
+        email: `countseller-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+        name: "Count Test Seller",
+      },
     });
     const viewer1 = await prisma.user.create({
-      data: { phone: `+1555countviewer1${suffix}`.slice(0, 30) },
+      data: {
+        phone: `+1555countviewer1${suffix}`.slice(0, 30),
+        email: `countviewer1-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+      },
     });
     const viewer2 = await prisma.user.create({
-      data: { phone: `+1555countviewer2${suffix}`.slice(0, 30) },
+      data: {
+        phone: `+1555countviewer2${suffix}`.slice(0, 30),
+        email: `countviewer2-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+      },
     });
     sellerId = seller.id;
     sellerToken = await issueSessionToken(seller);
@@ -168,10 +181,20 @@ describe("contactCount tracking (contact_only mode)", () => {
 
     const suffix = randomUUID();
     const seller = await prisma.user.create({
-      data: { phone: `+1555ccseller${suffix}`.slice(0, 30), name: "Contact Count Seller" },
+      data: {
+        phone: `+1555ccseller${suffix}`.slice(0, 30),
+        email: `ccseller-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+        name: "Contact Count Seller",
+      },
     });
     const buyer = await prisma.user.create({
-      data: { phone: `+1555ccbuyer${suffix}`.slice(0, 30), name: "Contact Count Buyer" },
+      data: {
+        phone: `+1555ccbuyer${suffix}`.slice(0, 30),
+        email: `ccbuyer-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+        name: "Contact Count Buyer",
+      },
     });
     sellerId = seller.id;
     sellerToken = await issueSessionToken(seller);
@@ -231,7 +254,11 @@ describe("contactCount tracking (contact_only mode)", () => {
   it("a second, different buyer requesting contact does increase contactCount", async () => {
     const suffix = randomUUID();
     const secondBuyer = await prisma.user.create({
-      data: { phone: `+1555ccbuyer2${suffix}`.slice(0, 30) },
+      data: {
+        phone: `+1555ccbuyer2${suffix}`.slice(0, 30),
+        email: `ccbuyer2-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+      },
     });
     const secondBuyerToken = await issueSessionToken(secondBuyer);
 

@@ -1,5 +1,8 @@
 import type {
   ApiResponse,
+  AuthOptions,
+  IdentifierChannel,
+  OtpVerifyResult,
   Category,
   CompleteProfileInput,
   CreateRatingInput,
@@ -83,23 +86,49 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return readApiBody<T>(res);
 }
 
-// Emails a 6-digit login code. The response is the same whether or not an
-// account exists for the address - see POST /api/auth/otp/request.
-export function requestOtp(email: string): Promise<{ message: string }> {
+// Which identifiers sign-in/sign-up may offer, and whether phone
+// verification is currently required - see GET /api/auth/options and
+// hooks/useAuthOptions.ts.
+export function fetchAuthOptions(): Promise<AuthOptions> {
+  return request("/api/auth/options");
+}
+
+// Sends a 6-digit code to an email or phone. The response is the same
+// whether or not an account exists for it - see POST /api/auth/otp/request.
+export function requestOtp(
+  channel: IdentifierChannel,
+  identifier: string,
+): Promise<{ message: string }> {
   return request("/api/auth/otp/request", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ channel, identifier }),
   });
 }
 
-export function verifyOtpCode(
-  email: string,
-  code: string,
-  ref?: string,
-): Promise<{ user: User; token: string; isNewAccount: boolean }> {
+// intent "signin" never creates an account: with none for the identifier it
+// returns { noAccount, signupToken } for confirmSignup below. "signup"
+// creates one, or logs into the existing one.
+export function verifyOtpCode(input: {
+  channel: IdentifierChannel;
+  identifier: string;
+  code: string;
+  intent: "signin" | "signup";
+  ref?: string;
+}): Promise<OtpVerifyResult> {
   return request("/api/auth/otp/verify", {
     method: "POST",
-    body: JSON.stringify({ email, code, ...(ref ? { ref } : {}) }),
+    body: JSON.stringify(input),
+  });
+}
+
+// "Create an account?" after a sign-in found none - no second code needed.
+export function confirmSignup(
+  signupToken: string,
+  ref?: string,
+): Promise<{ user: User; token: string; isNewAccount: boolean }> {
+  return request("/api/auth/signup/confirm", {
+    method: "POST",
+    body: JSON.stringify({ signupToken, ...(ref ? { ref } : {}) }),
   });
 }
 
@@ -315,22 +344,29 @@ export function sendEmailVerification(): Promise<{ message: string }> {
   return request("/api/users/me/email/send-verification", { method: "POST" });
 }
 
-// Add (or change) this account's sign-in email: emails a code to `email`,
-// and nothing changes on the account until verifyEmailClaimCode below
-// redeems it - see POST /api/users/me/email/claim/*. Used by the "add an
-// email to keep access" banner on /account and "Change email" on the
-// profile page.
-export function requestEmailClaimCode(email: string): Promise<{ message: string }> {
-  return request("/api/users/me/email/claim/request", {
+// Add (or change) this account's verified email or phone: sends a code to
+// it, and nothing changes on the account until verifyIdentifierClaimCode
+// below redeems it - see POST /api/users/me/identifiers/claim/*. Used by
+// the "finish verifying" banner on /account, /login/welcome, and "Change"
+// on the profile page.
+export function requestIdentifierClaimCode(
+  channel: IdentifierChannel,
+  identifier: string,
+): Promise<{ message: string }> {
+  return request("/api/users/me/identifiers/claim/request", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ channel, identifier }),
   });
 }
 
-export function verifyEmailClaimCode(email: string, code: string): Promise<{ user: User }> {
-  return request("/api/users/me/email/claim/verify", {
+export function verifyIdentifierClaimCode(
+  channel: IdentifierChannel,
+  identifier: string,
+  code: string,
+): Promise<{ user: User }> {
+  return request("/api/users/me/identifiers/claim/verify", {
     method: "POST",
-    body: JSON.stringify({ email, code }),
+    body: JSON.stringify({ channel, identifier, code }),
   });
 }
 

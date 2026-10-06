@@ -21,6 +21,8 @@ import { CATEGORY_LABEL, titleFieldLabel, venueFieldLabel } from "@/lib/category
 import { ApiError, createListing, fetchDeliveryEligibility, geocodeVenue, runOcr } from "@/lib/api";
 import { getVenuePickerCityCenter } from "@/lib/venuePickerCityCenters";
 import { useAuth } from "@/context/AuthContext";
+import { useVerificationGaps } from "@/hooks/useVerificationGaps";
+import { VerifyToContinue } from "@/components/account/VerifyToContinue";
 
 const ALL_CATEGORIES: Category[] = ["MOVIE", "EVENT", "SPORT"];
 
@@ -48,6 +50,7 @@ type AutoFillableField =
 
 export default function SellPage() {
   const { user } = useAuth();
+  const verificationGaps = useVerificationGaps(user);
   const [category, setCategory] = useState<Category>("MOVIE");
   const [movieName, setMovieName] = useState("");
   const [theaterName, setTheaterName] = useState("");
@@ -282,10 +285,25 @@ export default function SellPage() {
     }
   }
 
+  // Listing needs a verified email (and phone, when required) - POST
+  // /api/listings refuses otherwise, so this is caught before the form.
+  if (user && verificationGaps.length > 0) {
+    return (
+      <main className="flex min-h-dvh flex-col items-center bg-background px-5 py-6">
+        <VerifyToContinue
+          gaps={verificationGaps}
+          action="sell tickets"
+          className="mt-10 w-full max-w-sm"
+        />
+      </main>
+    );
+  }
+
   // Buyers are handed the seller's phone at contact reveal, so POST
-  // /api/listings refuses a seller without one - caught here first rather
-  // than after they've filled in the whole form.
-  if (user && !user.phone) {
+  // /api/listings refuses a seller without one, verified or not - caught
+  // here first rather than after they've filled in the whole form.
+  // (isPhoneVerified also covers the Play review account, which is exempt.)
+  if (user && !user.phone && !user.isPhoneVerified) {
     return (
       <main className="flex min-h-dvh flex-col items-center bg-background px-5 py-6">
         <div className="mt-10 w-full max-w-sm rounded-2xl border border-line bg-surface p-6 text-center">

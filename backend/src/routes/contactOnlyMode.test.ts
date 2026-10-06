@@ -37,7 +37,12 @@ describe("PAYMENT_MODE=contact_only", () => {
       data: { phone: `+1555comseller${suffix}`.slice(0, 30), name: "Contact Only Seller" },
     });
     const buyer = await prisma.user.create({
-      data: { phone: `+1555combuyer${suffix}`.slice(0, 30), name: "Contact Only Buyer" },
+      data: {
+        phone: `+1555combuyer${suffix}`.slice(0, 30),
+        email: `combuyer-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+        name: "Contact Only Buyer",
+      },
     });
     sellerId = seller.id;
     sellerToken = await issueSessionToken(seller);
@@ -94,6 +99,7 @@ describe("PAYMENT_MODE=contact_only", () => {
     expect(res.body.data.contact).toEqual({
       name: sellerName,
       phone: sellerPhone,
+      phoneVerified: false,
       hasWhatsapp: false,
       ratingSummary: { averageStars: null, totalRatings: 0, recentComments: [] },
       isVerified: false,
@@ -119,7 +125,11 @@ describe("PAYMENT_MODE=contact_only", () => {
   it("a second, concurrent-ish contact request from a different buyer also doesn't touch seats/status", async () => {
     const suffix = randomUUID();
     const secondBuyer = await prisma.user.create({
-      data: { phone: `+1555combuyer2${suffix}`.slice(0, 30) },
+      data: {
+        phone: `+1555combuyer2${suffix}`.slice(0, 30),
+        email: `combuyer2-${randomUUID()}@example.com`,
+        emailVerifiedAt: new Date(),
+      },
     });
     const secondBuyerToken = await issueSessionToken(secondBuyer);
 
@@ -146,6 +156,7 @@ describe("PAYMENT_MODE=contact_only", () => {
     expect(res.body.data.contact).toEqual({
       name: sellerName,
       phone: sellerPhone,
+      phoneVerified: false,
       hasWhatsapp: false,
       ratingSummary: { averageStars: null, totalRatings: 0, recentComments: [] },
       isVerified: false,
