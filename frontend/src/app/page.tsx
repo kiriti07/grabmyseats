@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useSearchLocation } from "@/hooks/useSearchLocation";
 import { OptionCard } from "@/components/home/OptionCard";
 import { SearchBar } from "@/components/search/SearchBar";
+import { BrandCredit } from "@/components/ui/BrandCredit";
 
 export default function Home() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -90,6 +91,12 @@ export default function Home() {
           />
         </div>
       </div>
+
+      {/* Same for logged-in and logged-out. The content block above is
+          flex-1 and mt-auto pins this to the bottom of a short screen; on a
+          taller-than-screen page it just flows after the content (never
+          fixed/sticky, so it can't cover anything). */}
+      <BrandCredit className="mt-auto" />
     </main>
   );
 }

@@ -2,12 +2,12 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import type { IdentifierChannel } from "@grabmyseats/shared";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
+import { BrandCredit } from "@/components/ui/BrandCredit";
 import { ApiError, requestOtp } from "@/lib/api";
 import { useAuthOptions } from "@/hooks/useAuthOptions";
 import { normalizeIdentifier } from "@/lib/identifier";
@@ -138,11 +138,7 @@ export function IdentifierAuth({ intent }: { intent: "signin" | "signup" }) {
         </Link>
       </p>
 
-      {/* 72x98 matches the logo SVG's cropped 144x196 viewBox (2:1). */}
-      <div className="mt-10 flex flex-col items-center gap-2">
-        <Image src="/images/brilliant-eight-logo.svg" alt="Brilliant Eight" width={72} height={98} />
-        <p className="text-center text-xs text-muted">Developed by Brilliant Eight</p>
-      </div>
+      <BrandCredit />
     </AuthShell>
   );
 }
