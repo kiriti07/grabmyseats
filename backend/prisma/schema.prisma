@@ -106,6 +106,8 @@ model User {
   ratingsGiven    Rating[] @relation("rater")
   ratingsReceived Rating[] @relation("ratedUser")
 
+  venuePinVotes VenuePinVote[]
+
   // Short, shareable code auto-generated for every user (see
   // lib/referral.ts's generateUniqueReferralCode, which POST
   // /api/auth/otp/verify's signup branch always calls explicitly) - never
@@ -505,4 +507,50 @@ model Rating {
   createdAt     DateTime    @default(now())
 
   @@index([ratedUserId])
+}
+
+enum VenueSource {
+  SELLER_CONFIRMED
+  SEEDED
+}
+
+// Known venue locations, learned from pins sellers confirmed on the sell
+// form (lib/geo/venueLearning.ts) - looked up before OpenStreetMap
+// (lib/geo/venueLookup.ts), with pg_trgm fuzzy matching on normalizedName
+// through the hand-written "Venue_normalizedName_trgm_idx" GiST index (see
+// its migration - like the Listing indexes, it isn't representable here).
+// Keyed per city on the parsed name plus locality ("" when the name had
+// none), so "PVR: Atrium Gachibowli" and "PVR: Kukatpally" stay distinct.
+model Venue {
+  id             String         @id @default(cuid())
+  normalizedName String
+  displayName    String
+  locality       String         @default("")
+  cityId         String
+  lat            Float
+  lng            Float
+  source         VenueSource
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  pinVotes       VenuePinVote[]
+
+  @@unique([cityId, normalizedName, locality])
+}
+
+// Each seller's most recent confirmed pin for a venue (one row per seller
+// per venue). An existing Venue's coordinates only ever move when 3
+// different sellers' pins agree with each other (within 150m) and not with
+// the current location - one seller can never move a venue on their own.
+model VenuePinVote {
+  id        String   @id @default(cuid())
+  venueId   String
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lat       Float
+  lng       Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([venueId, userId])
 }

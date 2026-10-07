@@ -141,6 +141,26 @@ export const otpIpLimiter = rateLimit({
   },
 });
 
+// Max 20 venue lookups (POST /api/listings/geocode) per user per 10
+// minutes. Each one can spend a shared, 1-request-per-second OpenStreetMap
+// Nominatim slot (lib/geocode.ts), so one account mustn't be able to drain
+// it for everyone. Mount after requireAuth.
+export const geocodeLimiter = rateLimit({
+  windowMs: 10 * MINUTE,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new RedisStore({ sendCommand, prefix: "rl:geocode:" }),
+  keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? "unknown"),
+  handler: (_req, res) => {
+    const body: ApiResponse<never> = {
+      success: false,
+      error: "Too many venue lookups. Place the pin on the map instead, or try again shortly.",
+    };
+    res.status(429).json(body);
+  },
+});
+
 // Max 5 admin login attempts per username per 15 minutes - a
 // password-based login (unlike customer OTP) is directly brute-forceable,
 // and this endpoint guards accounts that can suspend users and issue

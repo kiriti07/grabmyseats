@@ -20,6 +20,8 @@ import { DELIVERY_METHOD_DESCRIPTION, DELIVERY_METHOD_LABEL } from "@/lib/delive
 import { CATEGORY_LABEL, titleFieldLabel, venueFieldLabel } from "@/lib/category";
 import { ApiError, createListing, fetchDeliveryEligibility, geocodeVenue, runOcr } from "@/lib/api";
 import { getVenuePickerCityCenter } from "@/lib/venuePickerCityCenters";
+import type { VenuePickerMode } from "@/components/sell/VenuePicker";
+import { ApproximateBadge } from "@/components/sell/ApproximateBadge";
 import { useAuth } from "@/context/AuthContext";
 import { useVerificationGaps } from "@/hooks/useVerificationGaps";
 import { VerifyToContinue } from "@/components/account/VerifyToContinue";
@@ -32,8 +34,14 @@ const VenuePicker = dynamic(
   { ssr: false },
 );
 
-const VENUE_GEOCODE_DEBOUNCE_MS = 700;
-type VenueStatus = "idle" | "checking" | "resolved" | "failed";
+// idle: not looked up yet (or the name changed since). picking: the seller
+// is placing/adjusting the pin in VenuePicker.
+type VenueStatus = "idle" | "checking" | "resolved" | "picking";
+type VenuePickerState = {
+  mode: VenuePickerMode;
+  position: { lat: number; lng: number } | null;
+  locality: string | null;
+};
 
 // Matches MAX_FILE_SIZE_BYTES in backend/src/middleware/upload.ts - caught
 // here too so a seller finds out before waiting on an upload that the
@@ -73,14 +81,22 @@ export default function SellPage() {
   // be seen when that request resolves.
   const skipOcrRef = useRef(false);
 
-  // Resolved venue location, confirmed either automatically (geocoding
-  // succeeded) or by the seller via VenuePicker below. Submission is
-  // blocked until this is set - never silently falls back to unconfirmed
-  // coordinates.
+  // Resolved venue location, confirmed either automatically (the venue was
+  // found) or by the seller via VenuePicker below. Submission is blocked
+  // until this is set - never silently falls back to unconfirmed
+  // coordinates. venueApproximate: the confirmed pin is only a locality's
+  // position the seller didn't move - still listable, but sent as
+  // venuePinApproximate so the backend never learns it as the venue.
   const [venueStatus, setVenueStatus] = useState<VenueStatus>("idle");
   const [venueCoords, setVenueCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [venueLabel, setVenueLabel] = useState<string | null>(null);
   const [venueCleanedName, setVenueCleanedName] = useState("");
+  const [venueApproximate, setVenueApproximate] = useState(false);
+  const [venuePicker, setVenuePicker] = useState<VenuePickerState | null>(null);
+  // Ignores a lookup's answer if a newer one has started since.
+  const venueLookupSeqRef = useRef(0);
+  // name|city of the last lookup, so blurring an unchanged field is free.
+  const lastVenueLookupRef = useRef<string | null>(null);
 
   const [availableDeliveryMethods, setAvailableDeliveryMethods] = useState<DeliveryMethod[]>([
     "IN_PERSON",
@@ -105,38 +121,58 @@ export default function SellPage() {
     );
   }
 
-  useEffect(() => {
-    if (!theaterName.trim() || !city) {
-      setVenueStatus("idle");
-      setVenueCoords(null);
-      setVenueLabel(null);
-      return;
-    }
+  function resetVenue() {
+    venueLookupSeqRef.current += 1;
+    lastVenueLookupRef.current = null;
+    setVenueStatus("idle");
+    setVenueCoords(null);
+    setVenueLabel(null);
+    setVenueApproximate(false);
+    setVenuePicker(null);
+  }
 
+  // Looks the venue up once per explicit action - the theater field losing
+  // focus, a city change, or an OCR fill - never per keystroke: every
+  // lookup can cost a shared, 1-request-per-second OpenStreetMap slot (see
+  // backend/src/lib/geocode.ts).
+  async function lookUpVenue(name: string, cityName: string) {
+    const trimmed = name.trim();
+    if (!trimmed || !cityName) return;
+    const key = `${trimmed}|${cityName}`;
+    if (key === lastVenueLookupRef.current) return;
+
+    resetVenue();
+    lastVenueLookupRef.current = key;
+    const seq = venueLookupSeqRef.current;
     setVenueStatus("checking");
-    const timer = setTimeout(async () => {
-      try {
-        const preview = await geocodeVenue(theaterName, city);
-        setVenueCleanedName(preview.cleanedName);
-        if (preview.found && preview.lat !== null && preview.lng !== null) {
-          setVenueCoords({ lat: preview.lat, lng: preview.lng });
-          setVenueLabel(preview.displayName);
-          setVenueStatus("resolved");
-        } else {
-          setVenueCoords(null);
-          setVenueLabel(null);
-          setVenueStatus("failed");
-        }
-      } catch {
-        setVenueCleanedName(theaterName);
-        setVenueCoords(null);
-        setVenueLabel(null);
-        setVenueStatus("failed");
+    try {
+      const preview = await geocodeVenue(trimmed, cityName);
+      if (seq !== venueLookupSeqRef.current) return;
+      setVenueCleanedName(preview.cleanedName);
+      if (preview.kind === "venue" && preview.lat !== null && preview.lng !== null) {
+        setVenueCoords({ lat: preview.lat, lng: preview.lng });
+        setVenueLabel(preview.displayName);
+        setVenueStatus("resolved");
+      } else if (preview.kind === "locality" && preview.lat !== null && preview.lng !== null) {
+        // Only the area resolved: open the map there and ask for the exact spot.
+        setVenuePicker({
+          mode: "approximate",
+          position: { lat: preview.lat, lng: preview.lng },
+          locality: preview.locality,
+        });
+        setVenueStatus("picking");
+      } else {
+        setVenuePicker({ mode: "notFound", position: null, locality: null });
+        setVenueStatus("picking");
       }
-    }, VENUE_GEOCODE_DEBOUNCE_MS);
-
-    return () => clearTimeout(timer);
-  }, [theaterName, city]);
+    } catch {
+      if (seq !== venueLookupSeqRef.current) return;
+      lastVenueLookupRef.current = null;
+      setVenueCleanedName(trimmed);
+      setVenuePicker({ mode: "notFound", position: null, locality: null });
+      setVenueStatus("picking");
+    }
+  }
 
   // Wraps a field's setter so editing an auto-filled value clears its
   // "auto-filled, please verify" badge - the badge should only ever
@@ -190,6 +226,7 @@ export default function SellPage() {
       if (fields.theaterName && !theaterName.trim()) {
         setTheaterName(fields.theaterName);
         nextAutoFilled.theaterName = true;
+        void lookUpVenue(fields.theaterName, city);
       }
       if (fields.showtime && !showtime) {
         setShowtime(isoToDatetimeLocalValue(fields.showtime));
@@ -270,6 +307,7 @@ export default function SellPage() {
     formData.append("screenshot", screenshot);
     formData.append("theaterLat", String(venueCoords.lat));
     formData.append("theaterLng", String(venueCoords.lng));
+    formData.append("venuePinApproximate", String(venueApproximate));
     if (qrData) formData.append("qrData", qrData);
 
     setIsSubmitting(true);
@@ -469,7 +507,13 @@ export default function SellPage() {
           <input
             id="theaterName"
             value={theaterName}
-            onChange={(e) => edited("theaterName", setTheaterName)(e.target.value)}
+            onChange={(e) => {
+              edited("theaterName", setTheaterName)(e.target.value);
+              // A different name invalidates the located venue; it's looked
+              // up again when the field loses focus.
+              if (venueStatus !== "idle") resetVenue();
+            }}
+            onBlur={() => void lookUpVenue(theaterName, city)}
             placeholder={category === "MOVIE" ? "PVR Phoenix Market City" : "M. Chinnaswamy Stadium"}
             className={INPUT_CLASS}
           />
@@ -482,7 +526,10 @@ export default function SellPage() {
           <select
             id="city"
             value={city}
-            onChange={(e) => setCity(e.target.value)}
+            onChange={(e) => {
+              setCity(e.target.value);
+              void lookUpVenue(theaterName, e.target.value);
+            }}
             className={INPUT_CLASS}
           >
             <option value="" disabled>
@@ -502,17 +549,43 @@ export default function SellPage() {
         {venueStatus === "checking" && (
           <p className="-mt-2 text-xs text-muted">Locating venue...</p>
         )}
-        {venueStatus === "resolved" && (
-          <p className="-mt-2 text-xs text-success">Located: {venueLabel} ✓</p>
+        {venueStatus === "resolved" && venueCoords && (
+          <div className="-mt-2 flex flex-wrap items-center gap-2 text-xs">
+            {venueApproximate && <ApproximateBadge />}
+            <span className={venueApproximate ? "text-muted" : "text-success"}>
+              Located: {venueLabel}
+              {venueApproximate ? "" : " ✓"}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setVenuePicker({
+                  mode: venueApproximate ? "approximate" : "adjust",
+                  position: venueCoords,
+                  locality: null,
+                });
+                setVenueStatus("picking");
+              }}
+              className="font-medium text-gold hover:text-gold-dim"
+            >
+              Adjust pin
+            </button>
+          </div>
         )}
-        {venueStatus === "failed" && (
+        {venueStatus === "picking" && venuePicker && (
           <VenuePicker
             initialQuery={venueCleanedName || theaterName}
             city={city}
             cityCenter={getVenuePickerCityCenter(city)}
-            onConfirm={(coords, label) => {
+            mode={venuePicker.mode}
+            initialPosition={venuePicker.position ?? undefined}
+            initialLabel={venuePicker.mode === "adjust" ? venueLabel : null}
+            locality={venuePicker.locality}
+            onConfirm={(coords, label, { approximate }) => {
               setVenueCoords(coords);
               setVenueLabel(label);
+              setVenueApproximate(approximate);
+              setVenuePicker(null);
               setVenueStatus("resolved");
             }}
           />

@@ -20,8 +20,9 @@ import { prisma } from "../lib/prisma";
 import { Prisma } from "../generated/prisma/client";
 import { PAYMENT_MODE } from "../lib/config";
 import { storageProvider } from "../lib/storage";
-import { geocodeAddress } from "../lib/geocode";
-import { cleanTheaterName } from "../lib/geo/cleanTheaterName";
+import { lookupVenue } from "../lib/geo/venueLookup";
+import { learnVenuePin } from "../lib/geo/venueLearning";
+import { geocodeLimiter } from "../middleware/rateLimit";
 import { haversineDistanceMeters } from "../lib/geo/haversine";
 import { extractTextFromImage } from "../lib/ocr";
 import { decodeQrCode } from "../lib/qr";
@@ -137,7 +138,7 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
 
   // theaterLat/theaterLng can be supplied directly by a caller that already
   // has them (e.g. a future map-pin picker); otherwise they're resolved
-  // server-side from theaterName via geocodeAddress once the rest of the
+  // server-side from theaterName via lookupVenue once the rest of the
   // form validates, so sellers only ever have to type a theater name.
   let theaterLat = requireFiniteNumber(req.body?.theaterLat);
   let theaterLng = requireFiniteNumber(req.body?.theaterLng);
@@ -218,10 +219,11 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
     // The sell form is expected to have already resolved and confirmed
     // coordinates via POST /geocode (or the manual venue picker) before
     // ever reaching this endpoint - this is a fallback for callers that
-    // skip that step entirely.
-    const query = [cleanTheaterName(theaterName!), city, "India"].filter(Boolean).join(", ");
-    const geocoded = await geocodeAddress(query);
-    if (!geocoded) {
+    // skip that step entirely. Only an actual venue match is accepted here
+    // - a locality-only match is approximate and needs a seller to place
+    // the pin.
+    const geocoded = await lookupVenue(theaterName!, city);
+    if (geocoded.kind !== "venue" || geocoded.lat === null || geocoded.lng === null) {
       const body: ApiResponse<never> = {
         success: false,
         error: "Could not locate that theater. Check the spelling, or include the city.",
@@ -235,7 +237,7 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
 
   // Belt-and-suspenders: by this point theaterLat/theaterLng must have come
   // from either the validated coordsSupplied branch or a successful
-  // geocodeAddress() call, both of which guarantee finite in-range values -
+  // lookupVenue() call, both of which guarantee finite in-range values -
   // but trusting that invariant with a bare `!` assertion is exactly how a
   // future change to either branch would turn into an uncaught 500 here
   // instead of a clear 400. Fails loud and clean if it's ever wrong.
@@ -297,6 +299,27 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
     };
     res.status(400).json(body);
     return;
+  }
+
+  // A pin the seller confirmed on the sell form (found automatically or
+  // dragged) teaches the Venue table - see lib/geo/venueLearning.ts for the
+  // city-bounds and several-sellers-must-agree rules. The form sends
+  // venuePinApproximate=true for a locality-only pin the seller didn't
+  // move, which is never learned. Best-effort: the listing already exists,
+  // so a learning failure is logged, never surfaced.
+  if (coordsSupplied) {
+    try {
+      await learnVenuePin({
+        userId: req.user!.id,
+        theaterName: theaterName!,
+        cityName: city,
+        lat: theaterLat!,
+        lng: theaterLng!,
+        approximate: req.body?.venuePinApproximate === "true",
+      });
+    } catch (err) {
+      console.error("[venues] failed to learn venue pin", { listingId: listing.id, err });
+    }
   }
 
   // Creating a listing is one of the two "qualifying actions" a referred
@@ -364,11 +387,15 @@ listingsRouter.post("/ocr", requireAuth, uploadScreenshot, async (req, res) => {
 });
 
 // Previews where a theater name + city would resolve to, so the sell form
-// can show the seller "Located: X" for confirmation before they submit,
-// instead of only finding out about a geocoding failure at creation time.
-// found=false is a normal outcome (200), not an error - the frontend uses
-// it to fall back to a manual venue picker, seeded with cleanedName.
-listingsRouter.post("/geocode", requireAuth, async (req, res) => {
+// can show the seller the match for confirmation before they submit.
+// kind "none" is a normal outcome (200), not an error - see GeocodePreview.
+// Resolves a theater name + city for the sell form: GrabMySeats' Venue
+// table first, then OpenStreetMap with several candidate queries (see
+// lib/geo/venueLookup.ts). Called only on an explicit action (the theater
+// field losing focus, a city change, an OCR fill, the picker's Search
+// button) - never per keystroke - and rate-limited per user, since every
+// miss can cost a shared, 1-request-per-second Nominatim slot.
+listingsRouter.post("/geocode", requireAuth, geocodeLimiter, async (req, res) => {
   const theaterName = requireNonEmptyString(req.body?.theaterName);
   const city = requireNonEmptyString(req.body?.city);
 
@@ -378,15 +405,10 @@ listingsRouter.post("/geocode", requireAuth, async (req, res) => {
     return;
   }
 
-  const cleanedName = cleanTheaterName(theaterName);
-  const query = [cleanedName, city, "India"].filter(Boolean).join(", ");
-  const geocoded = await geocodeAddress(query);
-
-  const data: GeocodePreview = geocoded
-    ? { found: true, lat: geocoded.lat, lng: geocoded.lng, displayName: geocoded.displayName, cleanedName }
-    : { found: false, lat: null, lng: null, displayName: null, cleanedName };
-
-  const body: ApiResponse<GeocodePreview> = { success: true, data };
+  const body: ApiResponse<GeocodePreview> = {
+    success: true,
+    data: await lookupVenue(theaterName, city),
+  };
   res.json(body);
 });
 

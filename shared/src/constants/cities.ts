@@ -5,6 +5,40 @@ export interface IndianMetroCity {
   lng: number;
 }
 
+export interface CityBounds {
+  south: number;
+  north: number;
+  west: number;
+  east: number;
+}
+
+// Generous rectangles around each metro area, including its satellite
+// cities (Navi Mumbai/Thane, Gurugram/Noida/Faridabad/Ghaziabad,
+// Secunderabad/Kokapet/Shamshabad, PCMC/Hinjewadi, Gandhinagar, Howrah/New
+// Town). Used to bound venue geocoding to the selected city and to refuse
+// seller-confirmed pins that land outside it (backend
+// lib/geo/venueLearning.ts) - not for anything distance-sensitive.
+export const CITY_BOUNDS: Record<string, CityBounds> = {
+  mumbai: { south: 18.85, north: 19.45, west: 72.75, east: 73.2 },
+  "delhi-ncr": { south: 28.3, north: 28.95, west: 76.8, east: 77.6 },
+  bengaluru: { south: 12.75, north: 13.25, west: 77.35, east: 77.85 },
+  hyderabad: { south: 17.2, north: 17.65, west: 78.15, east: 78.75 },
+  chennai: { south: 12.75, north: 13.3, west: 79.95, east: 80.35 },
+  kolkata: { south: 22.35, north: 22.8, west: 88.2, east: 88.55 },
+  pune: { south: 18.35, north: 18.75, west: 73.65, east: 74.05 },
+  ahmedabad: { south: 22.85, north: 23.25, west: 72.4, east: 72.75 },
+};
+
+export function isWithinCityBounds(cityId: string, lat: number, lng: number): boolean {
+  const b = CITY_BOUNDS[cityId];
+  return !!b && lat >= b.south && lat <= b.north && lng >= b.west && lng <= b.east;
+}
+
+// The sell form and listing APIs carry the city's display name.
+export function cityIdForName(name: string | null | undefined): string | null {
+  return INDIAN_METRO_CITIES.find((c) => c.name === name)?.id ?? null;
+}
+
 // Approximate city-center coordinates, used only as a search origin before
 // a user's precise geolocation is available - not for anything
 // distance-sensitive like the theater-proximity checks in the escrow flow.
