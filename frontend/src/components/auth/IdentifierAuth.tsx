@@ -138,15 +138,10 @@ export function IdentifierAuth({ intent }: { intent: "signin" | "signup" }) {
         </Link>
       </p>
 
-      <div className="mt-8 flex flex-col items-center gap-1">
-        <Image
-          src="/images/brilliant-eight-logo.svg"
-          alt="Brilliant Eight"
-          width={25}
-          height={28}
-          className="opacity-70"
-        />
-        <p className="text-center text-xs text-muted">A Brilliant Eight Production</p>
+      {/* 72x98 matches the logo SVG's cropped 144x196 viewBox (2:1). */}
+      <div className="mt-10 flex flex-col items-center gap-2">
+        <Image src="/images/brilliant-eight-logo.svg" alt="Brilliant Eight" width={72} height={98} />
+        <p className="text-center text-xs text-muted">Developed by Brilliant Eight</p>
       </div>
     </AuthShell>
   );
