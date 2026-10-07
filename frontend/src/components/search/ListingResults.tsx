@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ListingSearchResult } from "@grabmyseats/shared";
 import type { Coordinates } from "@/lib/geolocation";
 import type { CategoryFilter } from "./CategoryTabs";
-import { formatShowtimeShort } from "@/lib/format";
+import { formatListingDistance, formatShowtimeShort } from "@/lib/format";
 
 export function ListingResults({
   listings,
@@ -66,7 +66,9 @@ export function ListingResults({
               <span>{formatShowtimeShort(listing.showtime)}</span>
               <span>
                 {listing.availableSeats} seat{listing.availableSeats === 1 ? "" : "s"}
-                {!deemphasizeDistance && ` · ${listing.distanceKm.toFixed(1)} km away`}
+                {!deemphasizeDistance &&
+                  formatListingDistance(listing) &&
+                  ` · ${formatListingDistance(listing)}`}
                 {deemphasizeDistance && cityName && ` · ${cityName}`}
               </span>
             </div>

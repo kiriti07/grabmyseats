@@ -22,6 +22,7 @@ import type {
   Rating as SharedRating,
   RatingSummary,
 } from "@grabmyseats/shared";
+import { cityNameForId } from "@grabmyseats/shared";
 import { PAYMENT_MODE } from "./config";
 import { isActiveReviewAccount } from "./reviewAccess";
 
@@ -83,6 +84,8 @@ export function toSharedListing(listing: PrismaListing): SharedListing {
     theaterName: listing.theaterName,
     theaterLat: listing.theaterLat,
     theaterLng: listing.theaterLng,
+    locationPrecision: listing.locationPrecision,
+    cityName: cityNameForId(listing.cityId),
     showtime: listing.showtime.toISOString(),
     bookingId: listing.bookingId,
     totalSeats: listing.totalSeats,
@@ -125,6 +128,8 @@ export function toListingDetail(
     pricePerSeat: listing.pricePerSeat,
     status: listing.status,
     distanceKm,
+    locationPrecision: listing.locationPrecision,
+    cityName: cityNameForId(listing.cityId),
     availableDeliveryMethods: listing.availableDeliveryMethods,
     paymentMode: PAYMENT_MODE,
     sellerRatingSummary,

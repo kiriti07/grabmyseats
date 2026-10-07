@@ -11,7 +11,9 @@ import { ApproximateBadge } from "@/components/sell/ApproximateBadge";
 
 export type VenuePickerMode = "notFound" | "approximate" | "adjust";
 
-// The seller places or corrects the venue pin. Leaflet + OpenStreetMap
+// Opened only from the sell form's optional "Adjust location" link - the
+// server places venues on its own otherwise (resolveListingLocation). The
+// seller places or corrects the venue pin. Leaflet + OpenStreetMap
 // tiles - free, no API key (see backend/src/lib/geocode.ts). Three modes:
 // - "notFound": nothing resolved; starts at the city center.
 // - "approximate": only the locality resolved (e.g. Kokapet); starts there,
@@ -134,7 +136,7 @@ export function VenuePicker({
           ? `We found ${locality ?? "the area"}, but not the cinema itself`
           : mode === "adjust"
             ? "Adjust the venue's location"
-            : "We couldn't locate this venue automatically"}
+            : "Pin the venue's exact location"}
       </p>
       <p className="mt-1 text-xs text-muted">
         {mode === "adjust"

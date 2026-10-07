@@ -55,6 +55,7 @@ describe("category", () => {
     return req
       .field("movieName", overrides.movieName ?? "Category Test Title")
       .field("theaterName", overrides.theaterName ?? "Category Test Venue")
+      .field("city", "Bengaluru")
       .field("bookingId", overrides.bookingId ?? `CATTEST${randomUUID()}`.slice(0, 20))
       .field("totalSeats", overrides.totalSeats ?? "1")
       .field("pricePerSeat", overrides.pricePerSeat ?? "200")

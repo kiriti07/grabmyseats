@@ -8,19 +8,20 @@ import type {
   Listing as SharedListing,
   ListingDetail,
   ListingSearchResult,
+  LocationPrecision,
   MyListing,
   OcrExtractedFields,
   OcrResult,
   ReserveResult,
   TransactionContact,
 } from "@grabmyseats/shared";
-import { LIVE_LISTING_STATUSES } from "@grabmyseats/shared";
+import { LIVE_LISTING_STATUSES, cityIdForName, cityNameForId } from "@grabmyseats/shared";
 import { TITLE_SIMILARITY_THRESHOLD } from "../lib/searchMatch";
 import { prisma } from "../lib/prisma";
 import { Prisma } from "../generated/prisma/client";
 import { PAYMENT_MODE } from "../lib/config";
 import { storageProvider } from "../lib/storage";
-import { lookupVenue } from "../lib/geo/venueLookup";
+import { lookupVenue, resolveListingLocation } from "../lib/geo/venueLookup";
 import { learnVenuePin } from "../lib/geo/venueLearning";
 import { geocodeLimiter } from "../middleware/rateLimit";
 import { haversineDistanceMeters } from "../lib/geo/haversine";
@@ -136,12 +137,12 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
   const showtimeRaw = requireNonEmptyString(req.body?.showtime);
   const showtime = showtimeRaw ? new Date(showtimeRaw) : null;
 
-  // theaterLat/theaterLng can be supplied directly by a caller that already
-  // has them (e.g. a future map-pin picker); otherwise they're resolved
-  // server-side from theaterName via lookupVenue once the rest of the
-  // form validates, so sellers only ever have to type a theater name.
-  let theaterLat = requireFiniteNumber(req.body?.theaterLat);
-  let theaterLng = requireFiniteNumber(req.body?.theaterLng);
+  // theaterLat/theaterLng are only sent when the seller deliberately
+  // confirmed a pin ("Adjust location" on the sell form). Otherwise - the
+  // normal case - the location is resolved server-side from theaterName +
+  // city by resolveListingLocation below; sellers never have to deal with it.
+  const pinLat = requireFiniteNumber(req.body?.theaterLat);
+  const pinLng = requireFiniteNumber(req.body?.theaterLng);
   const coordsSupplied = req.body?.theaterLat !== undefined || req.body?.theaterLng !== undefined;
 
   // Not sent (or malformed) falls back to IN_PERSON-only, same as the
@@ -156,11 +157,14 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
   if (!movieName) errors.push("movieName is required");
   if (!theaterName) errors.push("theaterName is required");
   if (!bookingId) errors.push("bookingId is required");
+  // Always required: it's the fallback location (city center) and the area
+  // every resolved location - a seller's pin included - must fall inside.
+  if (!cityIdForName(city)) errors.push("city is required");
   if (coordsSupplied) {
-    if (theaterLat === null || theaterLat < -90 || theaterLat > 90) {
+    if (pinLat === null || pinLat < -90 || pinLat > 90) {
       errors.push("theaterLat must be a number between -90 and 90");
     }
-    if (theaterLng === null || theaterLng < -180 || theaterLng > 180) {
+    if (pinLng === null || pinLng < -180 || pinLng > 180) {
       errors.push("theaterLng must be a number between -180 and 180");
     }
   }
@@ -215,42 +219,17 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
     }
   }
 
-  if (!coordsSupplied) {
-    // The sell form is expected to have already resolved and confirmed
-    // coordinates via POST /geocode (or the manual venue picker) before
-    // ever reaching this endpoint - this is a fallback for callers that
-    // skip that step entirely. Only an actual venue match is accepted here
-    // - a locality-only match is approximate and needs a seller to place
-    // the pin.
-    const geocoded = await lookupVenue(theaterName!, city);
-    if (geocoded.kind !== "venue" || geocoded.lat === null || geocoded.lng === null) {
-      const body: ApiResponse<never> = {
-        success: false,
-        error: "Could not locate that theater. Check the spelling, or include the city.",
-      };
-      res.status(422).json(body);
-      return;
-    }
-    theaterLat = geocoded.lat;
-    theaterLng = geocoded.lng;
-  }
-
-  // Belt-and-suspenders: by this point theaterLat/theaterLng must have come
-  // from either the validated coordsSupplied branch or a successful
-  // lookupVenue() call, both of which guarantee finite in-range values -
-  // but trusting that invariant with a bare `!` assertion is exactly how a
-  // future change to either branch would turn into an uncaught 500 here
-  // instead of a clear 400. Fails loud and clean if it's ever wrong.
-  if (
-    theaterLat === null ||
-    theaterLng === null ||
-    !Number.isFinite(theaterLat) ||
-    !Number.isFinite(theaterLng)
-  ) {
-    const body: ApiResponse<never> = {
-      success: false,
-      error: "Invalid location data for this listing. Please re-select the venue and try again.",
-    };
+  // Never fails the listing: worst case it's placed at the city center with
+  // CITY precision. A seller pin outside the selected city is ignored (and
+  // resolved server-side instead) rather than trusted.
+  const location = await resolveListingLocation({
+    theaterName: theaterName!,
+    cityName: city!,
+    pin: coordsSupplied ? { lat: pinLat!, lng: pinLng! } : null,
+  });
+  if (!location) {
+    // Unreachable - city was validated above - but never guess a location.
+    const body: ApiResponse<never> = { success: false, error: "city is required" };
     res.status(400).json(body);
     return;
   }
@@ -270,8 +249,10 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
         category,
         movieName: movieName!,
         theaterName: theaterName!,
-        theaterLat,
-        theaterLng,
+        theaterLat: location.lat,
+        theaterLng: location.lng,
+        locationPrecision: location.precision,
+        cityId: location.cityId,
         showtime: showtime!,
         bookingId: bookingId!,
         totalSeats: totalSeats!,
@@ -288,11 +269,7 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
     // one place a structurally "valid" lat/lng pair could still fail at
     // the DB layer - surface that as a clean 400 instead of the generic
     // error handler's 500.
-    console.error("Failed to create listing with theaterLat/theaterLng", {
-      theaterLat,
-      theaterLng,
-      err,
-    });
+    console.error("Failed to create listing with theaterLat/theaterLng", { location, err });
     const body: ApiResponse<never> = {
       success: false,
       error: "Could not save this listing's location. Please re-select the venue and try again.",
@@ -301,21 +278,20 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
     return;
   }
 
-  // A pin the seller confirmed on the sell form (found automatically or
-  // dragged) teaches the Venue table - see lib/geo/venueLearning.ts for the
-  // city-bounds and several-sellers-must-agree rules. The form sends
-  // venuePinApproximate=true for a locality-only pin the seller didn't
-  // move, which is never learned. Best-effort: the listing already exists,
-  // so a learning failure is logged, never surfaced.
-  if (coordsSupplied) {
+  // Only a pin the seller confirmed teaches the Venue table - see
+  // lib/geo/venueLearning.ts for the city-bounds and
+  // several-sellers-must-agree rules. Server-resolved locations are never
+  // learned. Best-effort: the listing already exists, so a learning failure
+  // is logged, never surfaced.
+  if (location.source === "seller") {
     try {
       await learnVenuePin({
         userId: req.user!.id,
         theaterName: theaterName!,
         cityName: city,
-        lat: theaterLat!,
-        lng: theaterLng!,
-        approximate: req.body?.venuePinApproximate === "true",
+        lat: location.lat,
+        lng: location.lng,
+        approximate: false,
       });
     } catch (err) {
       console.error("[venues] failed to learn venue pin", { listingId: listing.id, err });
@@ -432,6 +408,8 @@ interface ListingSearchRow {
   availableSeats: number;
   pricePerSeat: number;
   distanceKm: number;
+  locationPrecision: LocationPrecision;
+  cityId: string | null;
 }
 
 // Mounted before any future `/:id` route so it isn't shadowed by a param match.
@@ -560,6 +538,8 @@ listingsRouter.get("/search", async (req, res) => {
       showtime,
       "availableSeats",
       "pricePerSeat",
+      "locationPrecision",
+      "cityId",
       ST_Distance("theaterLocation", ${origin}) / 1000 AS "distanceKm"
     FROM "Listing"
     WHERE ${Prisma.join(conditions, " AND ")}
@@ -575,6 +555,8 @@ listingsRouter.get("/search", async (req, res) => {
     availableSeats: row.availableSeats,
     pricePerSeat: row.pricePerSeat,
     distanceKm: row.distanceKm,
+    locationPrecision: row.locationPrecision,
+    cityName: cityNameForId(row.cityId),
   }));
 
   const body: ApiResponse<{ listings: ListingSearchResult[] }> = {

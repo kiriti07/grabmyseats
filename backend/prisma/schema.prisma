@@ -232,6 +232,19 @@ model Listing {
   // Kept in sync with theaterLat/theaterLng by a DB trigger (see migration) -
   // not written to directly by Prisma Client. Powers ST_DWithin searches.
   theaterLocation Unsupported("geography(Point, 4326)")?
+  // How much theaterLat/theaterLng can be trusted - set by
+  // resolveListingLocation (src/lib/geo/venueLookup.ts) at creation:
+  // EXACT = the venue itself (seller-confirmed pin, Venue table, or a single
+  // matching OSM cinema); AREA = only its locality; CITY = the city center,
+  // when nothing better resolved. Buyers see "X km away" for EXACT, "~X km
+  // away" for AREA and just the city for CITY. Defaults to CITY so any
+  // insert that doesn't set it fails safe (rows that predate this column
+  // were backfilled to EXACT by its migration).
+  locationPrecision LocationPrecision @default(CITY)
+  // INDIAN_METRO_CITIES id the seller selected (shared/src/constants/
+  // cities.ts) - shown in place of a distance for CITY precision. Null only
+  // on listings that predate this column.
+  cityId          String?
   showtime        DateTime
   bookingId       String // for verification
   totalSeats      Int
@@ -507,6 +520,12 @@ model Rating {
   createdAt     DateTime    @default(now())
 
   @@index([ratedUserId])
+}
+
+enum LocationPrecision {
+  EXACT
+  AREA
+  CITY
 }
 
 enum VenueSource {

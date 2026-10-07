@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { CITY_BOUNDS, INDIAN_METRO_CITIES, isWithinCityBounds } from "@grabmyseats/shared";
 import { buildVenueQueries, normalizeVenueText, parseTheaterName } from "./venueQueries";
 
-const queries = (raw: string, city = "Hyderabad") => buildVenueQueries(raw, city);
+// Bounded searches (the normal case): no city text in the queries.
+const queries = (raw: string) => buildVenueQueries(raw);
 
 describe("parseTheaterName / buildVenueQueries", () => {
   it("'ALLU Cinemas: Kokapet' keeps Kokapet as the locality", () => {
@@ -13,33 +14,34 @@ describe("parseTheaterName / buildVenueQueries", () => {
     });
     expect(queries("ALLU Cinemas: Kokapet")).toEqual([
       // full name and name+locality are the same query here - tried once
-      { q: "ALLU Cinemas, Kokapet, Hyderabad", kind: "venue" },
-      { q: "ALLU Cinemas, Hyderabad", kind: "venue" },
-      { q: "Kokapet, Hyderabad", kind: "locality" },
+      { q: "ALLU Cinemas, Kokapet", kind: "venue" },
+      { q: "ALLU Cinemas", kind: "venue" },
+      { q: "Kokapet", kind: "locality" },
     ]);
   });
 
-  it("'PVR Superplex Inorbit: LUXE, PXL, 4DX: Cyberabad(SCREEN 10)': tiers and screen suffix stripped, Cyberabad is not a locality", () => {
+  it("'PVR Superplex Inorbit: LUXE, PXL, 4DX: Cyberabad(SCREEN 10)': tiers and screen suffix stripped, Cyberabad is not a locality, Inorbit is (chain rule)", () => {
     const raw = "PVR Superplex Inorbit: LUXE, PXL, 4DX: Cyberabad(SCREEN 10)";
-    const parsed = parseTheaterName(raw);
-    expect(parsed.name).toBe("PVR Superplex Inorbit");
-    expect(parsed.locality).toBeNull();
+    expect(parseTheaterName(raw)).toMatchObject({ name: "PVR Superplex", locality: "Inorbit" });
     expect(queries(raw)).toEqual([
-      { q: "PVR Superplex Inorbit, LUXE, PXL, 4DX, Hyderabad", kind: "venue" },
-      { q: "PVR Superplex Inorbit, Hyderabad", kind: "venue" },
+      { q: "PVR Superplex Inorbit, LUXE, PXL, 4DX", kind: "venue" },
+      { q: "PVR Superplex, Inorbit", kind: "venue" },
+      { q: "PVR Superplex", kind: "venue" },
+      { q: "Inorbit", kind: "locality" },
     ]);
     const all = queries(raw).map((c) => c.q).join(" | ");
     expect(all).not.toMatch(/cyberabad/i);
     expect(all).not.toMatch(/screen|10/i);
-    expect(queries(raw).some((c) => c.kind === "locality")).toBe(false);
   });
 
-  it("'PVR Superplex Inorbit: LUXE, ...': the OCR ellipsis and tier leave no locality", () => {
+  it("'PVR Superplex Inorbit: LUXE, ...': the OCR ellipsis and tier are dropped; Inorbit found by the chain rule", () => {
     const raw = "PVR Superplex Inorbit: LUXE, ...";
-    expect(parseTheaterName(raw).locality).toBeNull();
+    expect(parseTheaterName(raw)).toMatchObject({ name: "PVR Superplex", locality: "Inorbit" });
     expect(queries(raw)).toEqual([
-      { q: "PVR Superplex Inorbit, LUXE, Hyderabad", kind: "venue" },
-      { q: "PVR Superplex Inorbit, Hyderabad", kind: "venue" },
+      { q: "PVR Superplex Inorbit, LUXE", kind: "venue" },
+      { q: "PVR Superplex, Inorbit", kind: "venue" },
+      { q: "PVR Superplex", kind: "venue" },
+      { q: "Inorbit", kind: "locality" },
     ]);
     expect(queries(raw).map((c) => c.q).join(" ")).not.toContain(".");
   });
@@ -52,9 +54,43 @@ describe("parseTheaterName / buildVenueQueries", () => {
       fullParts: ["PVR", "Atrium Gachibowli"],
     });
     expect(queries(raw)).toEqual([
-      { q: "PVR, Atrium Gachibowli, Hyderabad", kind: "venue" },
-      { q: "Atrium Gachibowli, Hyderabad", kind: "locality" },
+      { q: "PVR, Atrium Gachibowli", kind: "venue" },
+      { q: "Atrium Gachibowli", kind: "locality" },
     ]);
+  });
+
+  it("'ALLU Cinemas Kokapet Hyderabad' (no separator): trailing city dropped, locality after the venue-type word", () => {
+    expect(parseTheaterName("ALLU Cinemas Kokapet Hyderabad")).toEqual({
+      name: "ALLU Cinemas",
+      locality: "Kokapet",
+      fullParts: ["ALLU Cinemas Kokapet"],
+    });
+    expect(queries("ALLU Cinemas Kokapet Hyderabad")).toEqual([
+      { q: "ALLU Cinemas Kokapet", kind: "venue" },
+      { q: "ALLU Cinemas", kind: "venue" },
+      { q: "Kokapet", kind: "locality" },
+    ]);
+  });
+
+  it("'PVR Superplex Inorbit Hyderabad' (no separator): chain + format word, then the mall as locality", () => {
+    expect(parseTheaterName("PVR Superplex Inorbit Hyderabad")).toEqual({
+      name: "PVR Superplex",
+      locality: "Inorbit",
+      fullParts: ["PVR Superplex Inorbit"],
+    });
+    expect(queries("PVR Superplex Inorbit Hyderabad")).toEqual([
+      { q: "PVR Superplex Inorbit", kind: "venue" },
+      { q: "PVR Superplex", kind: "venue" },
+      { q: "Inorbit", kind: "locality" },
+    ]);
+  });
+
+  it("chain rule: other chains, and a city word inside the name is kept", () => {
+    expect(parseTheaterName("INOX GVK One")).toMatchObject({ name: "INOX", locality: "GVK One" });
+    expect(parseTheaterName("Cinepolis Hyderabad Central Mall Hyderabad")).toMatchObject({
+      name: "Cinepolis",
+      locality: "Hyderabad Central Mall",
+    });
   });
 
   it("a name with no area: no locality query at all", () => {
@@ -63,7 +99,15 @@ describe("parseTheaterName / buildVenueQueries", () => {
       locality: null,
       fullParts: ["Prasads Multiplex"],
     });
-    expect(queries("Prasads Multiplex")).toEqual([{ q: "Prasads Multiplex, Hyderabad", kind: "venue" }]);
+    expect(queries("Prasads Multiplex")).toEqual([{ q: "Prasads Multiplex", kind: "venue" }]);
+  });
+
+  it("appends the city only when the search can't be bounded to it", () => {
+    expect(buildVenueQueries("ALLU Cinemas: Kokapet", "Hyderabad").map((c) => c.q)).toEqual([
+      "ALLU Cinemas, Kokapet, Hyderabad",
+      "ALLU Cinemas, Hyderabad",
+      "Kokapet, Hyderabad",
+    ]);
   });
 
   it("a tier-only suffix is dropped, and tiers inside the name are removed from the name", () => {

@@ -1,5 +1,10 @@
-import { CITY_BOUNDS, cityIdForName, isWithinCityBounds } from "@grabmyseats/shared";
-import type { GeocodePreview } from "@grabmyseats/shared";
+import {
+  CITY_BOUNDS,
+  INDIAN_METRO_CITIES,
+  cityIdForName,
+  isWithinCityBounds,
+} from "@grabmyseats/shared";
+import type { GeocodePreview, LocationPrecision } from "@grabmyseats/shared";
 import { prisma } from "../prisma";
 import { nominatimSearch, type NominatimPlace } from "../geocode";
 import { buildVenueQueries, normalizeVenueText, parseTheaterName } from "./venueQueries";
@@ -64,29 +69,71 @@ export async function findVenueMatch(
   return scored[0].row;
 }
 
-// A venue query's hit should be the cinema itself: an OSM cinema, or else a
-// place whose name carries the venue's first word (e.g. a mall-listed "PVR
-// ..." entry). A locality query takes the top result, whatever it is - it's
-// approximate either way.
+// Result types a locality search may land on: a named place or district,
+// or a mall. Not roads or single buildings - a road can run for kilometres.
+function isAreaPlace(p: NominatimPlace): boolean {
+  return (
+    p.category === "place" ||
+    p.category === "landuse" ||
+    (p.category === "boundary" && p.type === "administrative") ||
+    (p.category === "shop" && p.type === "mall")
+  );
+}
+
+function words(value: string): string[] {
+  return normalizeVenueText(value).split(" ").filter(Boolean);
+}
+
+// Whether an OSM result mentions the locality: any of its longer words, or
+// the whole locality when all its words are short ("GVK One").
+function mentionsLocality(displayName: string, locality: string): boolean {
+  const haystack = words(displayName);
+  const significant = words(locality).filter((w) => w.length >= 4);
+  if (significant.length === 0) {
+    return ` ${haystack.join(" ")} `.includes(` ${normalizeVenueText(locality)} `);
+  }
+  return significant.some((w) => haystack.includes(w));
+}
+
+// What a candidate query's results may resolve to. Anything weaker is
+// skipped - and if every candidate is skipped, the listing falls back to the
+// city center (CITY) rather than keeping a wrong pin:
+// - venue query -> EXACT only for exactly one OSM cinema whose own name
+//   carries the venue's brand (first word) and which, when a locality is
+//   known, mentions it. Two same-brand cinemas the locality can't tell apart
+//   are ambiguous, not a match.
+// - locality query -> AREA for the top area-type result (place, district,
+//   mall) - never a road or a random building.
+// The caller has already dropped results outside the city's bounds.
 function pickPlace(
   places: NominatimPlace[],
   kind: "venue" | "locality",
-  venueName: string,
+  parsed: { name: string; locality: string | null },
 ): NominatimPlace | null {
-  if (kind === "locality") return places[0] ?? null;
-  const cinema = places.find((p) => p.category === "amenity" && p.type === "cinema");
-  if (cinema) return cinema;
-  const firstWord = normalizeVenueText(venueName).split(" ")[0];
-  return (
-    places.find((p) => firstWord && normalizeVenueText(p.displayName).split(" ").includes(firstWord)) ??
-    null
+  if (kind === "locality") return places.find(isAreaPlace) ?? null;
+
+  const brand = words(parsed.name)[0];
+  const cinemas = places.filter(
+    (p) =>
+      p.category === "amenity" &&
+      p.type === "cinema" &&
+      !!brand &&
+      words(p.displayName.split(",")[0]).includes(brand) &&
+      (!parsed.locality || mentionsLocality(p.displayName, parsed.locality)),
   );
+  return cinemas.length === 1 ? cinemas[0] : null;
 }
 
 // Resolves a theater name + city: GrabMySeats' own Venue table first, then
 // OpenStreetMap with each candidate query from buildVenueQueries in order.
-// Everything is bounded to the city's area when the city is known.
-export async function lookupVenue(theaterName: string, cityName: string | null): Promise<GeocodePreview> {
+// Everything is bounded to the city's area when the city is known, and no
+// result outside it is ever returned. budgetMs caps the total time spent
+// queueing for Nominatim's 1 request/second slot.
+export async function lookupVenue(
+  theaterName: string,
+  cityName: string | null,
+  options: { budgetMs?: number } = {},
+): Promise<GeocodePreview> {
   const parsed = parseTheaterName(theaterName);
   const base = { cleanedName: parsed.name, locality: parsed.locality };
   const cityId = cityIdForName(cityName);
@@ -98,7 +145,8 @@ export async function lookupVenue(theaterName: string, cityName: string | null):
       normalizeVenueText(parsed.name),
       normalizeVenueText(parsed.locality ?? ""),
     );
-    if (match) {
+    // A seeded row with bad coordinates is ignored, not trusted.
+    if (match && isWithinCityBounds(cityId, match.lat, match.lng)) {
       return {
         ...base,
         found: true,
@@ -112,14 +160,16 @@ export async function lookupVenue(theaterName: string, cityName: string | null):
     }
   }
 
-  const deadline = Date.now() + LOOKUP_BUDGET_MS;
-  for (const candidate of buildVenueQueries(theaterName, cityName ?? "")) {
+  const deadline = Date.now() + (options.budgetMs ?? LOOKUP_BUDGET_MS);
+  // City text only when the search can't be bounded to the city's area -
+  // see buildVenueQueries.
+  for (const candidate of buildVenueQueries(theaterName, bounds ? null : cityName)) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
     const places = await nominatimSearch(candidate.q, { bounds, maxWaitMs: remaining });
     if (!places) continue;
     const inCity = cityId ? places.filter((p) => isWithinCityBounds(cityId, p.lat, p.lng)) : places;
-    const place = pickPlace(inCity, candidate.kind, parsed.name);
+    const place = pickPlace(inCity, candidate.kind, parsed);
     if (place) {
       return {
         ...base,
@@ -144,4 +194,67 @@ export async function lookupVenue(theaterName: string, cityName: string | null):
     lng: null,
     displayName: null,
   };
+}
+
+export interface ResolvedListingLocation {
+  lat: number;
+  lng: number;
+  precision: LocationPrecision;
+  cityId: string;
+  // "seller": a pin the seller confirmed (the only kind that's learned into
+  // Venue - see lib/geo/venueLearning.ts).
+  source: "seller" | "venue" | "osm" | "city";
+}
+
+// How long listing creation may spend on OpenStreetMap before settling for
+// a coarser precision - creation should never feel stuck on location.
+const LISTING_LOOKUP_BUDGET_MS = 4000;
+
+// Where a new listing goes, for POST /api/listings. Never fails - every
+// step that can't produce an in-city location just falls through:
+// 1. a pin the seller confirmed, inside the city's bounds -> EXACT;
+// 2. the Venue table, or exactly one matching OSM cinema -> EXACT;
+// 3. the venue's locality (place/district/mall) -> AREA;
+// 4. the city center -> CITY.
+// Returns null only for an unknown city, which the caller rejects as a
+// missing field before getting here.
+export async function resolveListingLocation(input: {
+  theaterName: string;
+  cityName: string;
+  pin: { lat: number; lng: number } | null;
+}): Promise<ResolvedListingLocation | null> {
+  const cityId = cityIdForName(input.cityName);
+  const city = INDIAN_METRO_CITIES.find((c) => c.id === cityId);
+  if (!cityId || !city) return null;
+
+  if (input.pin && isWithinCityBounds(cityId, input.pin.lat, input.pin.lng)) {
+    return { ...input.pin, precision: "EXACT", cityId, source: "seller" };
+  }
+
+  let preview: GeocodePreview | null = null;
+  try {
+    preview = await lookupVenue(input.theaterName, input.cityName, {
+      budgetMs: LISTING_LOOKUP_BUDGET_MS,
+    });
+  } catch (err) {
+    console.error("[venues] lookup failed; falling back to the city center", err);
+  }
+
+  if (
+    preview &&
+    preview.kind !== "none" &&
+    preview.lat !== null &&
+    preview.lng !== null &&
+    isWithinCityBounds(cityId, preview.lat, preview.lng)
+  ) {
+    return {
+      lat: preview.lat,
+      lng: preview.lng,
+      precision: preview.kind === "venue" ? "EXACT" : "AREA",
+      cityId,
+      source: preview.source === "venue" ? "venue" : "osm",
+    };
+  }
+
+  return { lat: city.lat, lng: city.lng, precision: "CITY", cityId, source: "city" };
 }

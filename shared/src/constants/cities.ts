@@ -39,6 +39,10 @@ export function cityIdForName(name: string | null | undefined): string | null {
   return INDIAN_METRO_CITIES.find((c) => c.name === name)?.id ?? null;
 }
 
+export function cityNameForId(id: string | null | undefined): string | null {
+  return INDIAN_METRO_CITIES.find((c) => c.id === id)?.name ?? null;
+}
+
 // Approximate city-center coordinates, used only as a search origin before
 // a user's precise geolocation is available - not for anything
 // distance-sensitive like the theater-proximity checks in the escrow flow.

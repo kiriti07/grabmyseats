@@ -13,7 +13,7 @@ import { RatingSummaryBadge } from "@/components/ui/RatingSummaryBadge";
 import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
 import { ContactPhone } from "@/components/ui/ContactPhone";
 import { ReportUserButton } from "@/components/report/ReportUserButton";
-import { formatShowtimeFull } from "@/lib/format";
+import { formatListingDistance, formatShowtimeFull } from "@/lib/format";
 import { CONTACT_ONLY_DISCLAIMER } from "@/lib/paymentMode";
 import { ApiError, getListing, reserveListing } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -146,10 +146,14 @@ function ListingDetailContent() {
                 <dt className="text-muted">Price per seat</dt>
                 <dd className="text-gold">₹{listing.pricePerSeat}</dd>
               </div>
-              {listing.distanceKm !== null && (
+              {formatListingDistance(listing) && (
                 <div className="flex justify-between">
-                  <dt className="text-muted">Distance</dt>
-                  <dd className="text-foreground">{listing.distanceKm.toFixed(1)} km</dd>
+                  {/* CITY precision shows where, not how far - see
+                      formatListingDistance. */}
+                  <dt className="text-muted">
+                    {listing.locationPrecision === "CITY" ? "Location" : "Distance"}
+                  </dt>
+                  <dd className="text-foreground">{formatListingDistance(listing)}</dd>
                 </div>
               )}
             </dl>

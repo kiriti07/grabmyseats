@@ -89,6 +89,7 @@ describe("referrals", () => {
       .set("Authorization", `Bearer ${token}`)
       .field("movieName", "Referral Test Movie")
       .field("theaterName", "Referral Test Theater")
+      .field("city", "Bengaluru")
       .field("bookingId", `REFTEST${randomUUID()}`.slice(0, 20))
       .field("totalSeats", "3")
       .field("pricePerSeat", "200")

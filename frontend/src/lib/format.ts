@@ -1,3 +1,5 @@
+import type { LocationPrecision } from "@grabmyseats/shared";
+
 // Showtimes have no real timezone anywhere in this app - they're stored and
 // transmitted as literal wall-clock values wearing a "Z" suffix with no
 // actual UTC conversion ever applied (see frontend/src/lib/datetimeLocal.ts
@@ -40,4 +42,20 @@ export function formatDateShort(iso: string): string {
     day: "numeric",
     month: "short",
   });
+}
+
+// How far away a listing is, as far as its location can be trusted (see
+// LocationPrecision in shared/src/listing.ts): EXACT -> "1.2 km away", AREA
+// (only the venue's locality is known) -> "~1.2 km away", CITY (the
+// coordinates are just the city center) -> the city name, never a distance.
+// null when there's nothing honest to show.
+export function formatListingDistance(listing: {
+  distanceKm: number | null;
+  locationPrecision: LocationPrecision;
+  cityName: string | null;
+}): string | null {
+  if (listing.locationPrecision === "CITY") return listing.cityName;
+  if (listing.distanceKm === null) return null;
+  const km = `${listing.distanceKm.toFixed(1)} km away`;
+  return listing.locationPrecision === "AREA" ? `~${km}` : km;
 }

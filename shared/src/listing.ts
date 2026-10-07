@@ -27,6 +27,12 @@ export const LIVE_LISTING_STATUSES: ListingStatus[] = ["ACTIVE", "PARTIALLY_SOLD
 // edit - is deliberately category-agnostic and must never branch on this.
 export type Category = "MOVIE" | "EVENT" | "SPORT";
 
+// How much a listing's theaterLat/theaterLng can be trusted - see
+// Listing.locationPrecision in backend/prisma/schema.prisma. Buyers see
+// "X km away" for EXACT, "~X km away" for AREA, and only the city for CITY
+// (the coordinates are just the city center then).
+export type LocationPrecision = "EXACT" | "AREA" | "CITY";
+
 export interface Listing {
   id: string;
   sellerId: string;
@@ -35,6 +41,10 @@ export interface Listing {
   theaterName: string;
   theaterLat: number;
   theaterLng: number;
+  locationPrecision: LocationPrecision;
+  // Display name of the city the seller selected; null only on listings
+  // created before cities were recorded.
+  cityName: string | null;
   showtime: string;
   bookingId: string;
   totalSeats: number;
@@ -80,6 +90,8 @@ export interface ListingSearchResult {
   availableSeats: number;
   pricePerSeat: number;
   distanceKm: number;
+  locationPrecision: LocationPrecision;
+  cityName: string | null;
 }
 
 // GET /api/listings/:id response: same public-safe fields as
@@ -98,6 +110,8 @@ export interface ListingDetail {
   pricePerSeat: number;
   status: ListingStatus;
   distanceKm: number | null;
+  locationPrecision: LocationPrecision;
+  cityName: string | null;
   availableDeliveryMethods: DeliveryMethod[];
   // The backend's current PAYMENT_MODE (see backend/src/lib/config.ts) -
   // carried on this response, rather than a separate frontend config fetch,

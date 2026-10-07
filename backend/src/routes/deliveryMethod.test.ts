@@ -188,6 +188,7 @@ describe("delivery method", () => {
         .set("Authorization", `Bearer ${sellerToken}`)
         .field("movieName", "Gate Test Movie")
         .field("theaterName", "Gate Test Theater")
+        .field("city", "Bengaluru")
         .field("bookingId", "GATETEST123")
         .field("totalSeats", "1")
         .field("pricePerSeat", "200")

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "./datetimeLocal";
-import { formatDateShort, formatShowtimeFull, formatShowtimeShort, formatTimeOnly } from "./format";
+import {
+  formatDateShort,
+  formatListingDistance,
+  formatShowtimeFull,
+  formatShowtimeShort,
+  formatTimeOnly,
+} from "./format";
 
 // Regression test for a bug where listings displayed a showtime shifted by
 // the viewer's local timezone offset (e.g. +5:30 for IST), because
@@ -50,5 +56,32 @@ describe("showtime save -> display round-trip", () => {
     expect(formatShowtimeFull(iso)).not.toContain("Sep 19");
     expect(formatShowtimeFull(iso)).not.toContain("4:00 AM");
     expect(formatShowtimeFull(iso)).toBe("Fri, Sep 18, 10:30 PM");
+  });
+});
+
+describe("formatListingDistance", () => {
+  it("EXACT: plain distance", () => {
+    expect(
+      formatListingDistance({ distanceKm: 1.234, locationPrecision: "EXACT", cityName: "Hyderabad" }),
+    ).toBe("1.2 km away");
+  });
+
+  it("AREA: approximate distance", () => {
+    expect(
+      formatListingDistance({ distanceKm: 3.06, locationPrecision: "AREA", cityName: "Hyderabad" }),
+    ).toBe("~3.1 km away");
+  });
+
+  it("CITY: the city only, never a distance", () => {
+    expect(
+      formatListingDistance({ distanceKm: 0.4, locationPrecision: "CITY", cityName: "Hyderabad" }),
+    ).toBe("Hyderabad");
+    expect(formatListingDistance({ distanceKm: 0.4, locationPrecision: "CITY", cityName: null })).toBeNull();
+  });
+
+  it("no origin (distanceKm null): nothing for EXACT/AREA", () => {
+    expect(
+      formatListingDistance({ distanceKm: null, locationPrecision: "EXACT", cityName: "Hyderabad" }),
+    ).toBeNull();
   });
 });

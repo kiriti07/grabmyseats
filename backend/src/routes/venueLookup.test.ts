@@ -134,22 +134,71 @@ describe("venue lookup and learning", () => {
       expect(res.body.data.source).not.toBe("venue");
     });
 
-    it("tries the candidates in order and stops at the first cinema", async () => {
+    it("tries the candidates in order (no city text - the box bounds it) and stops at the first cinema", async () => {
       osm = (q) =>
-        q === `allu cinemas ${TAG}, hyderabad`
-          ? [{ lat: "17.3916", lon: "78.3226", display_name: "ALLU Cinemas", category: "amenity", type: "cinema" }]
+        q === `allu cinemas ${TAG}`
+          ? [
+              {
+                lat: "17.3883",
+                lon: "78.3447",
+                display_name: `ALLU Cinemas ${TAG}, Kokapet main road, Kokapet, Ranga Reddy`,
+                category: "amenity",
+                type: "cinema",
+              },
+            ]
           : [];
       const res = await lookup(`ALLU Cinemas ${TAG}: Kokapet`);
-      expect(asked).toEqual([
-        `allu cinemas ${TAG}, kokapet, hyderabad`,
-        `allu cinemas ${TAG}, hyderabad`,
-      ]);
+      expect(asked).toEqual([`allu cinemas ${TAG}, kokapet`, `allu cinemas ${TAG}`]);
       expect(res.body.data).toMatchObject({ kind: "venue", source: "osm", approximate: false });
+    });
+
+    it("a cinema hit that doesn't mention the known locality is a different branch - skipped", async () => {
+      osm = (q) =>
+        q.startsWith(`brandx cinemas ${TAG}`)
+          ? [
+              {
+                lat: "17.44",
+                lon: "78.35",
+                display_name: `BrandX Cinemas ${TAG}, Kukatpally, Hyderabad`,
+                category: "amenity",
+                type: "cinema",
+              },
+            ]
+          : [];
+      const res = await lookup(`BrandX Cinemas ${TAG}: Kokapet`);
+      expect(res.body.data.kind).not.toBe("venue");
+    });
+
+    it("two same-brand cinemas the locality can't tell apart are ambiguous - no EXACT", async () => {
+      osm = (q) =>
+        q === `twinplex ${TAG}`
+          ? [
+              { lat: "17.4308", lon: "78.3735", display_name: `Twinplex ${TAG} One, Madhapur`, category: "amenity", type: "cinema" },
+              { lat: "17.4352", lon: "78.3868", display_name: `Twinplex ${TAG} Two, Madhapur`, category: "amenity", type: "cinema" },
+            ]
+          : [];
+      const res = await lookup(`Twinplex ${TAG}`);
+      expect(res.body.data.kind).toBe("none");
+    });
+
+    it("a road is never accepted as a locality", async () => {
+      osm = (q) =>
+        q === `mallroad ${TAG}`
+          ? [{ lat: "17.4366", lon: "78.3809", display_name: `Mallroad ${TAG} Road`, category: "highway", type: "secondary" }]
+          : [];
+      const res = await lookup(`Nowhere Cinemas ${TAG}: Mallroad ${TAG}`);
+      expect(res.body.data.kind).toBe("none");
+    });
+
+    it("a Venue row with coordinates outside the city is ignored", async () => {
+      await seedVenue(`badseed cinemas ${TAG}`, "", MUMBAI);
+      const res = await lookup(`Badseed Cinemas ${TAG}`);
+      expect(res.body.data.source).not.toBe("venue");
     });
 
     it("falls back to the locality: pin there, marked approximate", async () => {
       osm = (q) =>
-        q === `kokapet ${TAG}, hyderabad`
+        q === `kokapet ${TAG}`
           ? [{ lat: "17.39", lon: "78.32", display_name: "Kokapet, Hyderabad", category: "place", type: "suburb" }]
           : [];
       const res = await lookup(`Nowhere Cinemas ${TAG}: Kokapet ${TAG}`);
@@ -172,8 +221,15 @@ describe("venue lookup and learning", () => {
     });
 
     it("ignores results outside the selected city", async () => {
+      // A perfectly matching cinema - but in Mumbai.
       osm = () => [
-        { lat: String(MUMBAI.lat), lon: String(MUMBAI.lng), display_name: "Cinema", category: "amenity", type: "cinema" },
+        {
+          lat: String(MUMBAI.lat),
+          lon: String(MUMBAI.lng),
+          display_name: `Faraway Cinema ${TAG}, Mumbai`,
+          category: "amenity",
+          type: "cinema",
+        },
       ];
       const res = await lookup(`Faraway Cinema ${TAG}`);
       expect(res.body.data.kind).toBe("none");
@@ -233,24 +289,24 @@ describe("venue lookup and learning", () => {
     });
 
     it("one seller - even repeatedly - can't move an existing venue", async () => {
-      const name = `Solo Cinemas ${TAG}`;
+      const name = `Solo ${TAG} Cinemas`;
       const [{ user: first }, { user: other }] = [await createUser(), await createUser()];
       await learn(first.id, name, KOKAPET);
       for (let i = 0; i < 3; i++) {
         expect(await learn(other.id, name, pin(KOKAPET, 1000 + i * 10))).toBe("vote_recorded");
       }
-      expect(await venue(`solo cinemas ${TAG}`)).toMatchObject(KOKAPET);
+      expect(await venue(`solo ${TAG} cinemas`)).toMatchObject(KOKAPET);
     });
 
     it("a nearby pin just confirms the venue", async () => {
-      const name = `Near Cinemas ${TAG}`;
+      const name = `Near ${TAG} Cinemas`;
       const [{ user: first }, { user: other }] = [await createUser(), await createUser()];
       await learn(first.id, name, KOKAPET);
       expect(await learn(other.id, name, pin(KOKAPET, 100))).toBe("confirmed");
     });
 
     it("three different sellers agreeing within 150m move it, to their centroid", async () => {
-      const name = `Moved Cinemas ${TAG}`;
+      const name = `Moved ${TAG} Cinemas`;
       const { user: creator } = await createUser();
       await learn(creator.id, name, KOKAPET);
       const sellers = [await createUser(), await createUser(), await createUser()];
@@ -259,20 +315,20 @@ describe("venue lookup and learning", () => {
       expect(await learn(sellers[1].user.id, name, pin(KOKAPET, 1060))).toBe("vote_recorded");
       expect(await learn(sellers[2].user.id, name, pin(KOKAPET, 1120))).toBe("moved");
 
-      const moved = await venue(`moved cinemas ${TAG}`);
+      const moved = await venue(`moved ${TAG} cinemas`);
       expect(moved!.lat).toBeCloseTo(pin(KOKAPET, 1060).lat, 6);
       expect(moved!.lng).toBeCloseTo(KOKAPET.lng, 6);
     });
 
     it("three sellers who don't agree with each other (spread over 600m) don't move it", async () => {
-      const name = `Spread Cinemas ${TAG}`;
+      const name = `Spread ${TAG} Cinemas`;
       const { user: creator } = await createUser();
       await learn(creator.id, name, KOKAPET);
       for (const meters of [1000, 1300, 1600]) {
         const { user } = await createUser();
         expect(await learn(user.id, name, pin(KOKAPET, meters))).toBe("vote_recorded");
       }
-      expect(await venue(`spread cinemas ${TAG}`)).toMatchObject(KOKAPET);
+      expect(await venue(`spread ${TAG} cinemas`)).toMatchObject(KOKAPET);
     });
   });
 
@@ -282,9 +338,9 @@ describe("venue lookup and learning", () => {
       "base64",
     );
 
-    async function createListing(theaterName: string, approximate: boolean) {
+    async function createListing(theaterName: string, pin: { lat: number; lng: number } | null) {
       vi.spyOn(storageProvider, "upload").mockResolvedValue({ url: "https://example.com/test.png" } as never);
-      const res = await request(app)
+      const req = request(app)
         .post("/api/listings")
         .set("Authorization", `Bearer ${sellerToken}`)
         .field("movieName", "Venue Learning Movie")
@@ -294,16 +350,15 @@ describe("venue lookup and learning", () => {
         .field("totalSeats", "1")
         .field("pricePerSeat", "200")
         .field("showtime", new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
-        .field("theaterLat", String(GACHIBOWLI.lat))
-        .field("theaterLng", String(GACHIBOWLI.lng))
-        .field("venuePinApproximate", String(approximate))
         .attach("screenshot", onePixelPng, { filename: "test.png", contentType: "image/png" });
+      if (pin) req.field("theaterLat", String(pin.lat)).field("theaterLng", String(pin.lng));
+      const res = await req;
       expect(res.status).toBe(201);
       listingIds.push(res.body.data.listing.id);
     }
 
     it("a confirmed pin creates the venue", async () => {
-      await createListing(`PVR ${TAG}: Atrium Gachibowli, Hyderabad(AUDI 04)`, false);
+      await createListing(`PVR ${TAG}: Atrium Gachibowli, Hyderabad(AUDI 04)`, GACHIBOWLI);
       const v = await prisma.venue.findUnique({
         where: {
           cityId_normalizedName_locality: {
@@ -316,9 +371,14 @@ describe("venue lookup and learning", () => {
       expect(v).toMatchObject(GACHIBOWLI);
     });
 
-    it("an undragged approximate pin is not learned, but the listing is still created", async () => {
-      await createListing(`Approxlist ${TAG}: Kokapet`, true);
-      expect(await prisma.venue.count({ where: { normalizedName: `approxlist ${TAG}` } })).toBe(0);
+    it("a server-resolved location (no seller pin) is never learned", async () => {
+      await createListing(`Unpinned ${TAG}: Kokapet`, null);
+      expect(await prisma.venue.count({ where: { normalizedName: `unpinned ${TAG}` } })).toBe(0);
+    });
+
+    it("a seller pin outside the selected city is ignored - not learned, not used", async () => {
+      await createListing(`Strayed ${TAG}: Kokapet`, MUMBAI);
+      expect(await prisma.venue.count({ where: { normalizedName: `strayed ${TAG}` } })).toBe(0);
     });
   });
 });
