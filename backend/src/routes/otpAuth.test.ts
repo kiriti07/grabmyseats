@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import {
   afterAll,
   afterEach,
-  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -74,8 +73,9 @@ describe("OTP sign-in / sign-up (email or phone)", () => {
 
   // Each test gets its own client IP for the per-IP OTP limit (otpIpLimiter):
   // other suites hit the same endpoints in parallel from the same loopback
-  // address, and the counters live in Redis. trust proxy "loopback" is
-  // test-only here - it lets supertest's X-Forwarded-For set req.ip.
+  // address, and the counters live in Redis. The app trusts one proxy hop
+  // (app.ts), so the X-Forwarded-For header set below is what req.ip -
+  // and the limiter - sees, exactly as Caddy's would be in production.
   let clientIp = "";
   function randomClientIp(): string {
     const octet = () => Math.floor(Math.random() * 254) + 1;
@@ -89,10 +89,6 @@ describe("OTP sign-in / sign-up (email or phone)", () => {
 
   let emailSpy: MockInstance<(to: string, subject: string, body: string) => Promise<void>>;
   let smsSpy: MockInstance<(phone: string, message: string) => Promise<void>>;
-
-  beforeAll(() => {
-    app.set("trust proxy", "loopback");
-  });
 
   beforeEach(async () => {
     clientIp = randomClientIp();

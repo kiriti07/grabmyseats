@@ -19,6 +19,18 @@ import { devRouter } from "./routes/dev";
 
 export const app = express();
 
+// Production runs behind exactly one reverse proxy (Caddy), so req.ip -
+// which every per-IP rate limit keys on (middleware/rateLimit.ts) - must
+// come from the X-Forwarded-For entry Caddy appends, not the socket (which
+// is always Caddy itself, turning "per IP" into "everyone at once"). 1 =
+// trust exactly one hop: only the rightmost X-Forwarded-For entry is used,
+// so anything a client prepends to the header is ignored. Without a proxy
+// (local development) there's usually no such header and req.ip is the
+// socket address, as before. This relies on the backend port being
+// reachable only through Caddy - a client connecting to it directly could
+// set X-Forwarded-For to anything.
+app.set("trust proxy", 1);
+
 // Comma-separated so both the apex domain and "www" (or any other
 // alternate origin, e.g. a staging site) can be allowed at once - cors
 // accepts an array here just as well as a single string. Trimmed so
