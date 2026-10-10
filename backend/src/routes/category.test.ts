@@ -7,6 +7,7 @@ import request from "supertest";
 import { app } from "../app";
 import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
+import { ticketImage } from "../test/ticketImage";
 
 // End-to-end coverage for the ticket category system, against the real
 // local Postgres through the actual Express app - not mocked:
@@ -25,10 +26,6 @@ describe("category", () => {
   let sellerToken: string;
   const listingIds: string[] = [];
 
-  const onePixelPng = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-    "base64",
-  );
 
   beforeAll(async () => {
     const suffix = randomUUID();
@@ -51,7 +48,7 @@ describe("category", () => {
     await prisma.user.delete({ where: { id: sellerId } });
   });
 
-  function attachListingForm(req: request.Test, overrides: Record<string, string> = {}) {
+  async function attachListingForm(req: request.Test, overrides: Record<string, string> = {}) {
     return req
       .field("movieName", overrides.movieName ?? "Category Test Title")
       .field("theaterName", overrides.theaterName ?? "Category Test Venue")
@@ -62,7 +59,7 @@ describe("category", () => {
       .field("showtime", overrides.showtime ?? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
       .field("theaterLat", String(LAT))
       .field("theaterLng", String(LNG))
-      .attach("screenshot", onePixelPng, { filename: "test.png", contentType: "image/png" });
+      .attach("screenshot", await ticketImage(), { filename: "ticket.png", contentType: "image/png" });
   }
 
   describe("POST /api/listings", () => {

@@ -14,5 +14,5 @@
     "sourceMap": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "generated", "src/**/*.test.ts", "src/lib/__fixtures__"]
+  "exclude": ["node_modules", "dist", "generated", "src/**/*.test.ts", "src/lib/__fixtures__", "src/test"]
 }

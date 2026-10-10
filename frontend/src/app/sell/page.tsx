@@ -69,7 +69,6 @@ export default function SellPage() {
   const [pricePerSeat, setPricePerSeat] = useState("");
   const [bookingId, setBookingId] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
-  const [qrData, setQrData] = useState<string | null>(null);
 
   const [autoFilled, setAutoFilled] = useState<Partial<Record<AutoFillableField, boolean>>>({});
   const [isScanning, setIsScanning] = useState(false);
@@ -173,8 +172,8 @@ export default function SellPage() {
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setQrData(null);
+    const input = e.target;
+    const file = input.files?.[0] ?? null;
     setScanNotice(null);
     if (file && !file.type.startsWith("image/")) {
       setError("Screenshot must be an image file");
@@ -192,9 +191,8 @@ export default function SellPage() {
 
     setIsScanning(true);
     try {
-      const { fields, qrData } = await runOcr(file, category);
+      const { fields } = await runOcr(file, category);
       if (skipOcrRef.current) return;
-      setQrData(qrData);
 
       // Only ever fill a currently-empty field - never overwrite something
       // the seller already typed, even if they typed it before picking a
@@ -229,8 +227,15 @@ export default function SellPage() {
       if (Object.keys(nextAutoFilled).length === 0) {
         setScanNotice("Couldn't confidently read any details from this screenshot - fill them in below.");
       }
-    } catch {
-      if (!skipOcrRef.current) {
+    } catch (err) {
+      // 422 (no readable ticket barcode/QR code) and 409 (ticket already
+      // listed) mean this image can't be listed at all - the server would
+      // refuse it again on submit - so it's cleared rather than kept.
+      if (err instanceof ApiError && (err.status === 422 || err.status === 409)) {
+        setError(err.message);
+        setScreenshot(null);
+        input.value = "";
+      } else if (!skipOcrRef.current) {
         setScanNotice("Couldn't auto-read this screenshot - fill in the details manually.");
       }
     } finally {
@@ -285,7 +290,6 @@ export default function SellPage() {
       formData.append("theaterLat", String(pinnedVenue.lat));
       formData.append("theaterLng", String(pinnedVenue.lng));
     }
-    if (qrData) formData.append("qrData", qrData);
 
     setIsSubmitting(true);
     try {
@@ -454,11 +458,11 @@ export default function SellPage() {
             {isScanning
               ? "Scanning screenshot for details..."
               : skipOcr
-                ? "Auto-fill skipped - fill in the details below yourself."
+                ? "Auto-fill skipped - fill in the details below yourself. We'll still check the ticket's barcode or QR code when you submit."
                 : scanNotice ??
                   (category === "MOVIE"
                     ? "We'll try to auto-fill the fields below from your screenshot."
-                    : "We'll scan for a QR code, but you'll need to fill in the details below yourself.")}
+                    : "We'll check the ticket's barcode or QR code, but you'll need to fill in the details below yourself.")}
           </p>
         </div>
 

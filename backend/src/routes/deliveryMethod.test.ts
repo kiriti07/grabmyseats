@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
+import { ticketImage } from "../test/ticketImage";
 import { SELLER_TRUST_MIN_COMPLETED_SALES } from "../lib/sellerTrust";
 
 // End-to-end coverage for the delivery-method feature, against the real
@@ -17,12 +18,11 @@ import { SELLER_TRUST_MIN_COMPLETED_SALES } from "../lib/sellerTrust";
 //     own check-in stays mandatory either way
 //   - the email-forward submit/view endpoints' access control
 //
-// POST /api/listings and POST /:id/email-forward both accept a file upload,
-// but every scenario here only reaches the codepaths that run *before* the
-// actual storageProvider.upload() call (rejected by validation first, or a
+// POST /:id/email-forward accepts a file upload, but every scenario here
+// only reaches the codepaths that run *before* the actual
+// storageProvider.upload() call (rejected by validation first, or a
 // text-only email-forward submission) - so none of this needs real
-// Cloudinary credentials, matching how the OCR/screenshot suites are
-// avoided elsewhere in this repo's test setup.
+// Cloudinary credentials. POST /api/listings no longer uploads anything.
 //
 // The last nested describe below (reserve + confirm-receipt gate) needs
 // PAYMENT_MODE=escrow (/check-in, /confirm-receipt, /email-forward's
@@ -173,15 +173,10 @@ describe("delivery method", () => {
       await prisma.user.delete({ where: { id: sellerId } });
     });
 
-    it("403s an ineligible seller offering EMAIL_FORWARD, before touching upload", async () => {
-      // A real (tiny) image is attached so the request clears the sync
-      // validation stage (screenshot required) and actually reaches the
-      // trust gate check - which runs before storageProvider.upload(), so
-      // this never touches Cloudinary regardless.
-      const onePixelPng = Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "base64",
-      );
+    it("403s an ineligible seller offering EMAIL_FORWARD", async () => {
+      // A ticket image (with a readable QR code) is attached so the request
+      // clears validation and the barcode check and actually reaches the
+      // trust gate.
 
       const res = await request(app)
         .post("/api/listings")
@@ -196,7 +191,7 @@ describe("delivery method", () => {
         .field("theaterLat", String(LAT))
         .field("theaterLng", String(LNG))
         .field("availableDeliveryMethods", JSON.stringify(["IN_PERSON", "EMAIL_FORWARD"]))
-        .attach("screenshot", onePixelPng, { filename: "test.png", contentType: "image/png" });
+        .attach("screenshot", await ticketImage(), { filename: "ticket.png", contentType: "image/png" });
 
       expect(res.status).toBe(403);
       expect(res.body.success).toBe(false);

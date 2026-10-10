@@ -6,12 +6,12 @@ import { INDIAN_METRO_CITIES } from "@grabmyseats/shared";
 import { app } from "../app";
 import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
-import { storageProvider } from "../lib/storage";
+import { ticketImage } from "../test/ticketImage";
 
 // Location precision end to end through POST /api/listings
 // (resolveListingLocation in lib/geo/venueLookup.ts): EXACT / AREA / CITY,
 // never failing a listing over location, and every resolved point inside the
-// selected city. Nominatim (fetch) and the screenshot upload are mocked. Names
+// selected city. Nominatim (fetch) is mocked; screenshots are generated QR tickets. Names
 // carry a per-run tag word so neither the Venue table nor the Nominatim cache
 // (both persist locally) can answer for a different run.
 describe("listing location precision", () => {
@@ -20,10 +20,6 @@ describe("listing location precision", () => {
   const KOKAPET = { lat: 17.3916, lng: 78.3226 };
   const GACHIBOWLI = { lat: 17.4401, lng: 78.3489 };
   const MUMBAI = { lat: 19.076, lng: 72.8777 };
-  const onePixelPng = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-    "base64",
-  );
 
   const userIds: string[] = [];
   const listingIds: string[] = [];
@@ -49,7 +45,7 @@ describe("listing location precision", () => {
       .field("totalSeats", "1")
       .field("pricePerSeat", "200")
       .field("showtime", new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
-      .attach("screenshot", onePixelPng, { filename: "test.png", contentType: "image/png" });
+      .attach("screenshot", await ticketImage(), { filename: "ticket.png", contentType: "image/png" });
     if (fields.city !== undefined) req.field("city", fields.city);
     if (fields.pin) req.field("theaterLat", String(fields.pin.lat)).field("theaterLng", String(fields.pin.lng));
     const res = await req;
@@ -71,7 +67,6 @@ describe("listing location precision", () => {
 
   beforeEach(() => {
     vi.stubEnv("NOMINATIM_MIN_INTERVAL_MS", "0");
-    vi.spyOn(storageProvider, "upload").mockResolvedValue({ url: "https://example.com/test.png" } as never);
     osm = () => [];
     fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const q = new URL(String(input)).searchParams.get("q") ?? "";

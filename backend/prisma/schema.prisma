@@ -264,8 +264,19 @@ model Listing {
   // pricePerSeat * totalSeats must not exceed this by more than a small
   // rounding/OCR-noise tolerance. Kept afterward for dispute evidence.
   totalAmountPaid Float?
-  qrData          String? // if per-seat QR available
-  screenshotUrl   String? // uploaded booking confirmation screenshot
+  // Legacy: no longer written. qrData was the raw ticket payload the client
+  // forwarded; screenshotUrl a public Cloudinary copy of the screenshot.
+  // Old values are cleared by scripts/cleanupListingTicketMedia.ts.
+  qrData          String?
+  screenshotUrl   String?
+  // HMAC of the ticket's decoded barcode/QR payload - see
+  // lib/ticketFingerprint.ts. Null on rows created before it existed. One
+  // live listing per fingerprint is enforced by the hand-written partial
+  // unique index "Listing_ticketFingerprint_live_key" (migration
+  // 20261011120000_listing_ticket_fingerprint) - Prisma can't express a
+  // partial index, so it isn't declared here; generate migrations
+  // schema-to-schema so it's never dropped.
+  ticketFingerprint String?
   status          ListingStatus                          @default(ACTIVE)
   createdAt       DateTime                               @default(now())
   transactions    Transaction[]

@@ -7,6 +7,7 @@ import { prisma } from "../lib/prisma";
 import { issueOtp } from "../lib/otpStore";
 import { loginOtpIdentifier } from "../lib/identity";
 import { issueSessionToken } from "../lib/session";
+import { ticketImage } from "../test/ticketImage";
 import { REFERRAL_MILESTONE_INTERVAL, REFERRAL_MILESTONE_POINTS } from "../lib/referral";
 
 // End-to-end coverage for referral tracking and the points ledger, against
@@ -20,10 +21,6 @@ import { REFERRAL_MILESTONE_INTERVAL, REFERRAL_MILESTONE_POINTS } from "../lib/r
 describe("referrals", () => {
   const LAT = 12.9716;
   const LNG = 77.5946;
-  const onePixelPng = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-    "base64",
-  );
 
   const userIds: string[] = [];
   const listingIds: string[] = [];
@@ -96,7 +93,7 @@ describe("referrals", () => {
       .field("showtime", new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
       .field("theaterLat", String(overrides.theaterLat ?? LAT))
       .field("theaterLng", String(overrides.theaterLng ?? LNG))
-      .attach("screenshot", onePixelPng, { filename: "test.png", contentType: "image/png" });
+      .attach("screenshot", await ticketImage(), { filename: "ticket.png", contentType: "image/png" });
     expect(res.status).toBe(201);
     listingIds.push(res.body.data.listing.id);
     return res.body.data.listing.id as string;

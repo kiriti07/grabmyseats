@@ -5,6 +5,7 @@ import request from "supertest";
 import { app } from "../app";
 import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
+import { ticketImage } from "../test/ticketImage";
 
 // Regression test for a timezone bug: a seller entering "20/09/2026, 22:30"
 // in the Sell form's Showtime field saw the listing displayed back as
@@ -34,10 +35,6 @@ describe("showtime round-trips exactly, with no timezone drift", () => {
   // Exactly the case from the bug report.
   const SHOWTIME_ISO = "2026-09-20T22:30:00.000Z";
 
-  const onePixelPng = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-    "base64",
-  );
 
   let sellerId: string;
   let sellerToken: string;
@@ -77,7 +74,7 @@ describe("showtime round-trips exactly, with no timezone drift", () => {
       .field("showtime", SHOWTIME_ISO)
       .field("theaterLat", String(LAT))
       .field("theaterLng", String(LNG))
-      .attach("screenshot", onePixelPng, { filename: "test.png", contentType: "image/png" });
+      .attach("screenshot", await ticketImage(), { filename: "ticket.png", contentType: "image/png" });
 
     expect(created.status).toBe(201);
     expect(created.body.data.listing.showtime).toBe(SHOWTIME_ISO);
@@ -116,7 +113,7 @@ describe("showtime round-trips exactly, with no timezone drift", () => {
       .field("showtime", new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
       .field("theaterLat", String(LAT))
       .field("theaterLng", String(LNG))
-      .attach("screenshot", onePixelPng, { filename: "test.png", contentType: "image/png" });
+      .attach("screenshot", await ticketImage(), { filename: "ticket.png", contentType: "image/png" });
     const listingId = created.body.data.listing.id;
     listingIds.push(listingId);
 

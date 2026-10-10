@@ -381,8 +381,11 @@ function TransactionDetailContent() {
                       />
                     </div>
                   ) : (
+                    // Booking screenshots are no longer stored (only a
+                    // fingerprint of the ticket's barcode is), so this is
+                    // every listing created since then.
                     <p className="mt-4 text-sm text-muted">
-                      No screenshot was uploaded for this listing.
+                      The seller hands over the ticket using the delivery method you chose.
                     </p>
                   ))}
                 {screenshotState === "loading" && (

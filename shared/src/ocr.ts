@@ -17,7 +17,9 @@ export interface OcrExtractedFields {
   totalAmountPaid: number | null;
 }
 
+// Only returned once the server has found a ticket barcode/QR code in the
+// image (otherwise the endpoint answers 422) - the decoded payload itself
+// is never sent back or stored.
 export interface OcrResult {
   fields: OcrExtractedFields;
-  qrData: string | null;
 }

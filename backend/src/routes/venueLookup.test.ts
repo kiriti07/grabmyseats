@@ -5,13 +5,13 @@ import request from "supertest";
 import { app } from "../app";
 import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
-import { storageProvider } from "../lib/storage";
+import { ticketImage } from "../test/ticketImage";
 import { learnVenuePin } from "../lib/geo/venueLearning";
 
 // Venue lookup (POST /api/listings/geocode -> lib/geo/venueLookup.ts) and
 // learning from confirmed pins (POST /api/listings -> lib/geo/
 // venueLearning.ts), against the real local Postgres + Redis. Nominatim
-// (fetch) and the screenshot upload are mocked. Venue names end in a per-run
+// (fetch) is mocked; screenshots are generated QR tickets. Venue names end in a per-run
 // tag word, since venues and the Nominatim cache persist in the local
 // DB/Redis - as the *last* word, so brands (first words) stay real words.
 describe("venue lookup and learning", () => {
@@ -333,13 +333,8 @@ describe("venue lookup and learning", () => {
   });
 
   describe("POST /api/listings feeds learning", () => {
-    const onePixelPng = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-      "base64",
-    );
 
     async function createListing(theaterName: string, pin: { lat: number; lng: number } | null) {
-      vi.spyOn(storageProvider, "upload").mockResolvedValue({ url: "https://example.com/test.png" } as never);
       const req = request(app)
         .post("/api/listings")
         .set("Authorization", `Bearer ${sellerToken}`)
@@ -350,7 +345,7 @@ describe("venue lookup and learning", () => {
         .field("totalSeats", "1")
         .field("pricePerSeat", "200")
         .field("showtime", new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
-        .attach("screenshot", onePixelPng, { filename: "test.png", contentType: "image/png" });
+        .attach("screenshot", await ticketImage(), { filename: "ticket.png", contentType: "image/png" });
       if (pin) req.field("theaterLat", String(pin.lat)).field("theaterLng", String(pin.lng));
       const res = await req;
       expect(res.status).toBe(201);

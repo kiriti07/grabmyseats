@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import type {
   ApiResponse,
@@ -20,13 +19,18 @@ import { TITLE_SIMILARITY_THRESHOLD } from "../lib/searchMatch";
 import { prisma } from "../lib/prisma";
 import { Prisma } from "../generated/prisma/client";
 import { PAYMENT_MODE } from "../lib/config";
-import { storageProvider } from "../lib/storage";
 import { lookupVenue, resolveListingLocation } from "../lib/geo/venueLookup";
 import { learnVenuePin } from "../lib/geo/venueLearning";
 import { geocodeLimiter } from "../middleware/rateLimit";
 import { haversineDistanceMeters } from "../lib/geo/haversine";
 import { extractTextFromImage } from "../lib/ocr";
-import { decodeQrCode } from "../lib/qr";
+import {
+  NO_TICKET_CODE_MESSAGE,
+  SCAN_TIMEOUT_MESSAGE,
+  ScanTimeoutError,
+  decodeTicketCodes,
+} from "../lib/ticketBarcode";
+import { TicketFingerprintConfigError, ticketFingerprint } from "../lib/ticketFingerprint";
 import { parseListingText } from "../lib/parseListingText";
 import { getSellerDeliveryEligibility } from "../lib/sellerTrust";
 import { consumeListingSeats } from "../lib/listingSeats";
@@ -79,6 +83,73 @@ function parseDeliveryMethods(value: unknown): DeliveryMethod[] | null {
 }
 
 export const listingsRouter = Router();
+
+// Statuses in which a listing holds its ticket's fingerprint, i.e. a second
+// listing of the same ticket is refused. Must match the WHERE clause of the
+// partial unique index "Listing_ticketFingerprint_live_key" (migration
+// 20261011120000_listing_ticket_fingerprint), which is the real guarantee;
+// this pre-check only turns the common case into a clean error early.
+// SOLD and FLAGGED count - re-listing a sold or under-review ticket is the
+// double-sell this exists to stop, and SOLD can revert to PARTIALLY_SOLD
+// when a reservation expires (lib/listingSeats.ts). So does WITHDRAWN once
+// any seat was sold; a WITHDRAWN listing with no sales frees it. EXPIRED
+// and WITHDRAWN never become live again, so no status change can trip the
+// index.
+const HOLDS_TICKET_FINGERPRINT = Prisma.sql`(
+  status IN ('ACTIVE', 'PARTIALLY_SOLD', 'SOLD', 'FLAGGED')
+  OR (status = 'WITHDRAWN' AND "availableSeats" < "totalSeats")
+)`;
+
+const DUPLICATE_TICKET_MESSAGE =
+  "This ticket is already listed on GrabMySeats. If you listed it, you'll find it in My Listings; otherwise contact support@grabmyseats.com.";
+
+type TicketCheck =
+  | { ok: true; fingerprint: string }
+  | { ok: false; status: number; error: string };
+
+// The server-side barcode requirement for a booking screenshot - never
+// trusts the client's own scan (or lack of one: "skip auto-fill" still
+// lands here via POST "/"). Decodes the image, fingerprints every code in
+// it, and refuses the image when none is readable or any of them is already
+// held by a live listing. The largest code's fingerprint is the one stored.
+// The duplicate message is the same whoever owns the other listing.
+async function checkTicketImage(buffer: Buffer): Promise<TicketCheck> {
+  let codes;
+  try {
+    codes = await decodeTicketCodes(buffer);
+  } catch (err) {
+    if (err instanceof ScanTimeoutError) {
+      return { ok: false, status: 503, error: SCAN_TIMEOUT_MESSAGE };
+    }
+    throw err;
+  }
+  if (codes.length === 0) return { ok: false, status: 422, error: NO_TICKET_CODE_MESSAGE };
+
+  let fingerprints: string[];
+  try {
+    fingerprints = codes.map((code) => ticketFingerprint(code.text));
+  } catch (err) {
+    if (!(err instanceof TicketFingerprintConfigError)) throw err;
+    console.error(`[ticket-fingerprint] ${err.message} - refusing listings until it is`);
+    return { ok: false, status: 503, error: "Listing tickets is temporarily unavailable. Please try again later." };
+  }
+  const held = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Listing"
+    WHERE "ticketFingerprint" IN (${Prisma.join(fingerprints)})
+      AND ${HOLDS_TICKET_FINGERPRINT}
+    LIMIT 1
+  `;
+  if (held.length > 0) return { ok: false, status: 409, error: DUPLICATE_TICKET_MESSAGE };
+  return { ok: true, fingerprint: fingerprints[0] };
+}
+
+function isDuplicateFingerprintError(err: unknown): boolean {
+  return (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    err.code === "P2002" &&
+    JSON.stringify(err.meta ?? {}).includes("ticketFingerprint")
+  );
+}
 
 // ₹ - rounding and OCR-figure precision noise, not a loophole for actually
 // overpricing a listing. See the price-integrity check in POST "/" below.
@@ -204,6 +275,15 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
     return;
   }
 
+  // Before anything slower (geocoding) - and regardless of whether the
+  // client ran POST /ocr first.
+  const ticket = await checkTicketImage(req.file!.buffer);
+  if (!ticket.ok) {
+    const body: ApiResponse<never> = { success: false, error: ticket.error };
+    res.status(ticket.status).json(body);
+    return;
+  }
+
   // Trust gate: EMAIL_FORWARD is only offerable by sellers with a track
   // record - see lib/sellerTrust.ts. Never trust a client-side check here
   // either, same reasoning as the price-integrity check above.
@@ -234,13 +314,8 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
     return;
   }
 
-  const filename = `${req.user!.id}-${randomUUID()}`;
-  const { url: screenshotUrl } = await storageProvider.upload(req.file!.buffer, filename);
-
-  // Set only when the client forwards a value it already decoded (see
-  // POST /ocr below) - never parsed or validated, just stored as-is.
-  const qrData = requireNonEmptyString(req.body?.qrData);
-
+  // The screenshot itself is never stored (no upload, no screenshotUrl),
+  // nor is its raw barcode payload (qrData) - only the fingerprint.
   let listing;
   try {
     listing = await prisma.listing.create({
@@ -259,12 +334,18 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
         availableSeats: totalSeats!,
         pricePerSeat: pricePerSeat!,
         totalAmountPaid,
-        screenshotUrl,
-        qrData,
+        ticketFingerprint: ticket.fingerprint,
         availableDeliveryMethods,
       },
     });
   } catch (err) {
+    // Lost a race with another listing of the same ticket: the partial
+    // unique index caught what checkTicketImage's pre-check couldn't.
+    if (isDuplicateFingerprintError(err)) {
+      const body: ApiResponse<never> = { success: false, error: DUPLICATE_TICKET_MESSAGE };
+      res.status(409).json(body);
+      return;
+    }
     // The theaterLocation trigger (see migration 20260830124200) is the
     // one place a structurally "valid" lat/lng pair could still fail at
     // the DB layer - surface that as a clean 400 instead of the generic
@@ -312,9 +393,11 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
   res.status(201).json(body);
 });
 
-// Runs OCR + QR decoding on a ticket screenshot and returns best-effort
-// pre-fill values for the /sell form. Never creates a listing itself -
-// the seller still has to review and submit via POST "/" above. Reuses
+// Checks a ticket screenshot for a readable barcode/QR code (422 if none,
+// 409 if the ticket is already listed - same checks POST "/" repeats, so
+// skipping this changes nothing) and runs OCR for best-effort pre-fill
+// values for the /sell form. Never creates a listing itself - the seller
+// still has to review and submit via POST "/" above. Reuses
 // uploadScreenshot so this only ever accepts the same image/8MB
 // constraints as listing creation.
 // EVENT/SPORT tickets don't share the movie-poster-ticket layout
@@ -323,7 +406,7 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
 // theaterName, a title heuristic that strips certification tags and
 // excludes "Screen N" lines. Rather than force those onto a different
 // ticket format, this returns an all-null fields object for non-MOVIE
-// categories - the seller just types everything in. QR decoding is
+// categories - the seller just types everything in. The barcode check is
 // unaffected either way (it isn't OCR/text-heuristic based).
 const EMPTY_OCR_FIELDS: OcrExtractedFields = {
   movieName: null,
@@ -342,22 +425,25 @@ listingsRouter.post("/ocr", requireAuth, uploadScreenshot, async (req, res) => {
     return;
   }
 
+  const ticket = await checkTicketImage(req.file.buffer);
+  if (!ticket.ok) {
+    const body: ApiResponse<never> = { success: false, error: ticket.error };
+    res.status(ticket.status).json(body);
+    return;
+  }
+
   const category = parseCategory(req.body?.category);
   const isMovie = category === "MOVIE";
 
-  const [extraction, qrData] = await Promise.all([
-    extractTextFromImage(req.file.buffer, { skipPosterCrop: !isMovie }).catch(() => ({
-      text: "",
-      lines: [],
-    })),
-    decodeQrCode(req.file.buffer).catch(() => null),
-  ]);
+  const extraction = await extractTextFromImage(req.file.buffer, {
+    skipPosterCrop: !isMovie,
+  }).catch(() => ({ text: "", lines: [] }));
 
   const fields = isMovie ? parseListingText(extraction.text, extraction.lines) : EMPTY_OCR_FIELDS;
 
   const body: ApiResponse<OcrResult> = {
     success: true,
-    data: { fields, qrData },
+    data: { fields },
   };
   res.json(body);
 });
