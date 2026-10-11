@@ -6,7 +6,8 @@ import { LIVE_LISTING_STATUSES, type MyListing } from "@grabmyseats/shared";
 import { formatShowtimeFull } from "@/lib/format";
 import { sortMyListingsByAttention } from "@/lib/listingSort";
 import { describeTransactionState } from "@/lib/transactionState";
-import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/datetimeLocal";
+import { showtimeProblem } from "@/lib/showtime";
+import { ShowtimePicker } from "@/components/sell/ShowtimePicker";
 import { INPUT_CLASS } from "@/lib/styles";
 import {
   ApiError,
@@ -63,7 +64,7 @@ export default function MyListingsPage() {
     if (kind === "sold") setSoldSeats(listing.availableSeats);
     if (kind === "edit") {
       setEditPricePerSeat(String(listing.pricePerSeat));
-      setEditShowtime(isoToDatetimeLocalValue(listing.showtime));
+      setEditShowtime(listing.showtime);
       setEditTotalSeats(String(listing.totalSeats));
     }
     setActiveAction({ listingId: listing.id, kind });
@@ -119,14 +120,15 @@ export default function MyListingsPage() {
       return;
     }
     if (!editShowtime) {
-      setActionError("Pick a showtime");
+      setActionError("Pick a showtime: the date, hour, minute and AM/PM");
       return;
     }
-    const showtimeIso = datetimeLocalValueToIso(editShowtime);
-    if (new Date(showtimeIso).getTime() <= Date.now()) {
-      setActionError("Showtime must be in the future");
+    const showtimeError = showtimeProblem(editShowtime);
+    if (showtimeError) {
+      setActionError(showtimeError);
       return;
     }
+    const showtimeIso = editShowtime;
 
     // Seat count is only ever sent when it's actually editable (nothing
     // reserved/sold yet) - sending it otherwise would 409 server-side even
@@ -365,12 +367,10 @@ export default function MyListingsPage() {
                             >
                               Showtime
                             </label>
-                            <input
+                            <ShowtimePicker
                               id={`showtime-${listing.id}`}
-                              type="datetime-local"
                               value={editShowtime}
-                              onChange={(e) => setEditShowtime(e.target.value)}
-                              className={INPUT_CLASS}
+                              onChange={setEditShowtime}
                             />
                           </div>
 

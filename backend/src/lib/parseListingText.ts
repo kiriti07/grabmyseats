@@ -1,4 +1,4 @@
-import type { OcrExtractedFields } from "@grabmyseats/shared";
+import { showtimeClockNow, type OcrExtractedFields } from "@grabmyseats/shared";
 import type { OcrLine } from "./ocr";
 
 // A hard-edged mask boundary (see cropPosterRegion.ts) sitting against
@@ -215,7 +215,7 @@ function extractTotalAmountPaid(text: string): number | null {
 
 // e.g. "Sat, 29 Aug | 10:50 PM" - the weekday prefix is optional since not
 // every screenshot format includes one.
-function extractShowtime(text: string): string | null {
+export function extractShowtime(text: string, nowMs: number = Date.now()): string | null {
   const match = text.match(
     /(?:[A-Za-z]{3,9},?\s*)?(\d{1,2})\s+([A-Za-z]{3,9})\D{0,6}?(\d{1,2}):(\d{2})\s*([AaPp][Mm])/,
   );
@@ -242,18 +242,15 @@ function extractShowtime(text: string): string | null {
   hour = hour % 12;
   if (isPm) hour += 12;
 
-  // Screenshots never include a year, so treat the extracted wall-clock
-  // values as the intended showtime for "this year, or next year if that
-  // date has already passed" - and store them as literal UTC components
-  // (no timezone math) so the value round-trips byte-for-byte through the
-  // frontend's datetime-local input regardless of where either machine's
-  // clock is set. See frontend/src/lib/datetimeLocal.ts.
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  let candidateMs = Date.UTC(year, monthIndex, day, hour, minute);
-  if (candidateMs < now.getTime() - 24 * 60 * 60 * 1000) {
-    candidateMs = Date.UTC(year + 1, monthIndex, day, hour, minute);
-  }
+  // Screenshots never include a year, so the nearest upcoming date is used:
+  // this year, or next year if that day is already over in India (a show
+  // earlier today stays today). Stored as literal UTC components with no
+  // timezone math - see shared/src/showtime.ts.
+  const today = showtimeClockNow(nowMs);
+  const todayStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  let year = today.getUTCFullYear();
+  if (Date.UTC(year, monthIndex, day) < todayStart) year += 1;
+  const candidateMs = Date.UTC(year, monthIndex, day, hour, minute);
   return new Date(candidateMs).toISOString();
 }
 

@@ -1,9 +1,9 @@
 import type { LocationPrecision } from "@grabmyseats/shared";
 
-// Showtimes have no real timezone anywhere in this app - they're stored and
-// transmitted as literal wall-clock values wearing a "Z" suffix with no
-// actual UTC conversion ever applied (see frontend/src/lib/datetimeLocal.ts
-// and backend/src/lib/parseListingText.ts). `timeZone: "UTC"` here is what
+// Showtimes are India-time (IST) wall-clock values stored with those same
+// numbers in the UTC fields - a literal "Z" suffix with no actual UTC
+// conversion ever applied (see shared/src/showtime.ts, lib/showtime.ts and
+// backend/src/lib/parseListingText.ts). `timeZone: "UTC"` here is what
 // keeps display consistent with that: it renders the ISO string's numbers
 // verbatim instead of letting the browser reinterpret them in the viewer's
 // local timezone (which would double-apply an offset that was never really

@@ -46,3 +46,57 @@ body {
     right: -12px;
   }
 }
+
+/* react-day-picker in the showtime picker (components/sell/ShowtimePicker.tsx),
+   in the dark/gold theme. Day cells are 44px tap targets, shrinking only on
+   phones too narrow to fit seven of them. */
+.showtime-calendar.rdp-root {
+  --rdp-accent-color: var(--gold);
+  --rdp-accent-background-color: rgba(232, 184, 75, 0.12);
+  --rdp-day-width: min(44px, calc((100vw - 4rem) / 7));
+  --rdp-day-height: var(--rdp-day-width);
+  --rdp-day_button-width: calc(var(--rdp-day-width) - 2px);
+  --rdp-day_button-height: calc(var(--rdp-day-height) - 2px);
+  --rdp-today-color: var(--gold);
+  --rdp-disabled-opacity: 0.3;
+  --rdp-nav_button-width: 2.75rem;
+  --rdp-nav_button-height: 2.75rem;
+  color: var(--foreground);
+}
+
+.showtime-calendar .rdp-month_caption {
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding-inline-start: 0.5rem;
+}
+
+.showtime-calendar .rdp-weekday {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.showtime-calendar .rdp-day_button:not(:disabled):hover {
+  background: var(--rdp-accent-background-color);
+}
+
+/* Today: gold ring and gold numeral. */
+.showtime-calendar .rdp-today:not(.rdp-selected) .rdp-day_button {
+  border-color: rgba(232, 184, 75, 0.55);
+  font-weight: 600;
+}
+
+.showtime-calendar .rdp-selected {
+  font-size: inherit;
+}
+
+.showtime-calendar .rdp-selected .rdp-day_button {
+  background: var(--gold);
+  color: #1a1408;
+}
+
+.showtime-calendar .rdp-day_button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}

@@ -32,8 +32,9 @@ describe("showtime round-trips exactly, with no timezone drift", () => {
   const LAT = 12.9716;
   const LNG = 77.5946;
 
-  // Exactly the case from the bug report.
-  const SHOWTIME_ISO = "2026-09-20T22:30:00.000Z";
+  // The case from the bug report (20 Sep, 22:30), moved to next year: POST
+  // now refuses a showtime that has already passed.
+  const SHOWTIME_ISO = `${new Date().getUTCFullYear() + 1}-09-20T22:30:00.000Z`;
 
 
   let sellerId: string;

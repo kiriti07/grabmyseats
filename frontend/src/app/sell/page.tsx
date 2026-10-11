@@ -15,7 +15,8 @@ import { ErrorText } from "@/components/ui/ErrorText";
 import { AutoFilledBadge } from "@/components/sell/AutoFilledBadge";
 import { INPUT_CLASS } from "@/lib/styles";
 import { formatShowtimeFull } from "@/lib/format";
-import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/datetimeLocal";
+import { showtimeProblem } from "@/lib/showtime";
+import { ShowtimePicker } from "@/components/sell/ShowtimePicker";
 import { DELIVERY_METHOD_DESCRIPTION, DELIVERY_METHOD_LABEL } from "@/lib/deliveryMethod";
 import { CATEGORY_LABEL, titleFieldLabel, venueFieldLabel } from "@/lib/category";
 import { ApiError, createListing, fetchDeliveryEligibility, geocodeVenue, runOcr } from "@/lib/api";
@@ -64,7 +65,10 @@ export default function SellPage() {
   const [movieName, setMovieName] = useState("");
   const [theaterName, setTheaterName] = useState("");
   const [city, setCity] = useState("");
+  // The stored ISO value (India time - see lib/showtime.ts); "" until a
+  // date and a full time are picked.
   const [showtime, setShowtime] = useState("");
+  const [showtimeMissing, setShowtimeMissing] = useState(false);
   const [totalSeats, setTotalSeats] = useState("1");
   const [pricePerSeat, setPricePerSeat] = useState("");
   const [bookingId, setBookingId] = useState("");
@@ -207,7 +211,7 @@ export default function SellPage() {
         nextAutoFilled.theaterName = true;
       }
       if (fields.showtime && !showtime) {
-        setShowtime(isoToDatetimeLocalValue(fields.showtime));
+        setShowtime(fields.showtime);
         nextAutoFilled.showtime = true;
       }
       if (fields.totalSeats && totalSeats === "1") {
@@ -255,7 +259,13 @@ export default function SellPage() {
       return;
     }
     if (!showtime) {
-      setError("Pick a showtime");
+      setShowtimeMissing(true);
+      setError("Pick a showtime: the date, hour, minute and AM/PM");
+      return;
+    }
+    const showtimeError = showtimeProblem(showtime);
+    if (showtimeError) {
+      setError(showtimeError);
       return;
     }
     if (!Number.isInteger(seats) || seats < 1) {
@@ -284,7 +294,7 @@ export default function SellPage() {
     formData.append("bookingId", bookingId.trim());
     formData.append("totalSeats", String(seats));
     formData.append("pricePerSeat", String(price));
-    formData.append("showtime", datetimeLocalValueToIso(showtime));
+    formData.append("showtime", showtime);
     formData.append("screenshot", screenshot);
     if (pinnedVenue) {
       formData.append("theaterLat", String(pinnedVenue.lat));
@@ -582,12 +592,14 @@ export default function SellPage() {
             Showtime
             {autoFilled.showtime && <AutoFilledBadge />}
           </label>
-          <input
+          <ShowtimePicker
             id="showtime"
-            type="datetime-local"
             value={showtime}
-            onChange={(e) => edited("showtime", setShowtime)(e.target.value)}
-            className={INPUT_CLASS}
+            onChange={(value) => {
+              setShowtimeMissing(false);
+              edited("showtime", setShowtime)(value);
+            }}
+            error={showtimeMissing && !showtime ? "Pick the date, hour, minute and AM/PM." : null}
           />
         </div>
 

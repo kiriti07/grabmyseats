@@ -14,7 +14,7 @@ import type {
   ReserveResult,
   TransactionContact,
 } from "@grabmyseats/shared";
-import { LIVE_LISTING_STATUSES, cityIdForName, cityNameForId } from "@grabmyseats/shared";
+import { LIVE_LISTING_STATUSES, cityIdForName, cityNameForId, isShowtimeInFuture } from "@grabmyseats/shared";
 import { TITLE_SIMILARITY_THRESHOLD } from "../lib/searchMatch";
 import { prisma } from "../lib/prisma";
 import { Prisma } from "../generated/prisma/client";
@@ -247,6 +247,9 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
   }
   if (!showtime || Number.isNaN(showtime.getTime())) {
     errors.push("showtime must be a valid date");
+  } else if (!isShowtimeInFuture(showtime)) {
+    // India time, like the stored value - see shared/src/showtime.ts.
+    errors.push("showtime must be in the future");
   }
   if (!req.file) {
     errors.push("screenshot (booking confirmation image) is required");
@@ -1195,7 +1198,7 @@ listingsRouter.patch("/:id", requireAuth, async (req, res) => {
   if (showtimeProvided) {
     if (!showtime || Number.isNaN(showtime.getTime())) {
       errors.push("showtime must be a valid date");
-    } else if (showtime.getTime() <= Date.now()) {
+    } else if (!isShowtimeInFuture(showtime)) {
       errors.push("showtime must be in the future");
     }
   }

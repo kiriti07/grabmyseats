@@ -1,9 +1,10 @@
-// This app has no concept of theater timezone anywhere - showtimes are
-// treated as literal wall-clock values with no offset math applied at any
-// point (see backend/src/lib/parseListingText.ts). These two helpers keep
-// that consistent for the <input type="datetime-local"> in the sell form:
-// the value's numbers are stored and read back byte-for-byte as UTC,
-// regardless of the seller's or the server's actual local timezone.
+// Showtimes are India-time wall-clock values stored in the UTC fields with
+// no offset math (see shared/src/showtime.ts and
+// backend/src/lib/parseListingText.ts). These two helpers convert between
+// that stored value and a "YYYY-MM-DDTHH:mm" string, byte-for-byte,
+// regardless of the device's or the server's timezone. The sell forms now
+// use ShowtimePicker (lib/showtime.ts), which follows the same convention;
+// format.test.ts keeps these as the reference round-trip.
 export function isoToDatetimeLocalValue(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
