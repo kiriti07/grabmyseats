@@ -16,6 +16,7 @@ import { AutoFilledBadge } from "@/components/sell/AutoFilledBadge";
 import { INPUT_CLASS } from "@/lib/styles";
 import { formatShowtimeFull } from "@/lib/format";
 import { showtimeProblem } from "@/lib/showtime";
+import { screenshotProblem, type ScreenshotProblem } from "@/lib/screenshotCheck";
 import { ShowtimePicker } from "@/components/sell/ShowtimePicker";
 import { DELIVERY_METHOD_DESCRIPTION, DELIVERY_METHOD_LABEL } from "@/lib/deliveryMethod";
 import { CATEGORY_LABEL, titleFieldLabel, venueFieldLabel } from "@/lib/category";
@@ -73,6 +74,12 @@ export default function SellPage() {
   const [pricePerSeat, setPricePerSeat] = useState("");
   const [bookingId, setBookingId] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
+  // Shown in red right under the upload field. Stays until the seller picks
+  // another file or dismisses it - removing the rejected file doesn't hide
+  // it. `seq` re-triggers the scroll-into-view for a repeat of the same text.
+  const [screenshotError, setScreenshotError] = useState<{ message: string; seq: number } | null>(null);
+  const screenshotErrorRef = useRef<HTMLDivElement>(null);
 
   const [autoFilled, setAutoFilled] = useState<Partial<Record<AutoFillableField, boolean>>>({});
   const [isScanning, setIsScanning] = useState(false);
@@ -168,6 +175,26 @@ export default function SellPage() {
     };
   }
 
+  // The message is right under the field, which on a phone is usually far
+  // above the submit button - bring it into view if it isn't already.
+  useEffect(() => {
+    const el = screenshotErrorRef.current;
+    if (!screenshotError || !el) return;
+    const { top, bottom } = el.getBoundingClientRect();
+    if (top < 0 || bottom > window.innerHeight) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [screenshotError]);
+
+  function showScreenshotProblem({ message, rejected }: ScreenshotProblem) {
+    setScreenshotError({ message, seq: Date.now() });
+    setScanNotice(null);
+    if (rejected) {
+      // This image can never be listed - clear it so it isn't resubmitted;
+      // the message above says why.
+      setScreenshot(null);
+      if (screenshotInputRef.current) screenshotInputRef.current.value = "";
+    }
+  }
+
   function handleSkipOcr() {
     skipOcrRef.current = true;
     setSkipOcr(true);
@@ -176,17 +203,16 @@ export default function SellPage() {
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const input = e.target;
-    const file = input.files?.[0] ?? null;
+    const file = e.target.files?.[0] ?? null;
     setScanNotice(null);
+    // A new file replaces the old one's message; clearing the field doesn't.
+    if (file) setScreenshotError(null);
     if (file && !file.type.startsWith("image/")) {
-      setError("Screenshot must be an image file");
-      setScreenshot(null);
+      showScreenshotProblem({ message: "Screenshot must be an image file.", rejected: true });
       return;
     }
     if (file && file.size > MAX_SCREENSHOT_BYTES) {
-      setError("Screenshot must be smaller than 8MB");
-      setScreenshot(null);
+      showScreenshotProblem({ message: "Screenshot must be smaller than 8MB.", rejected: true });
       return;
     }
     setError(null);
@@ -232,14 +258,14 @@ export default function SellPage() {
         setScanNotice("Couldn't confidently read any details from this screenshot - fill them in below.");
       }
     } catch (err) {
-      // 422 (no readable ticket barcode/QR code) and 409 (ticket already
-      // listed) mean this image can't be listed at all - the server would
-      // refuse it again on submit - so it's cleared rather than kept.
-      if (err instanceof ApiError && (err.status === 422 || err.status === 409)) {
-        setError(err.message);
-        setScreenshot(null);
-        input.value = "";
-      } else if (!skipOcrRef.current) {
+      // No code / already listed: the image can't be listed at all. Busy or
+      // offline: the check couldn't run (not worth saying if the seller has
+      // since skipped auto-fill - submitting runs it again). Anything else
+      // only means auto-fill failed.
+      const problem = screenshotProblem(err);
+      if (problem && (problem.rejected || !skipOcrRef.current)) {
+        showScreenshotProblem(problem);
+      } else if (!problem && !skipOcrRef.current) {
         setScanNotice("Couldn't auto-read this screenshot - fill in the details manually.");
       }
     } finally {
@@ -306,9 +332,16 @@ export default function SellPage() {
       const { listing } = await createListing(formData);
       setCreatedListing(listing);
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Something went wrong. Please try again.",
-      );
+      // The same ticket check runs here (it's the only check when auto-fill
+      // was skipped), so its answer goes in the same place.
+      const problem = screenshotProblem(err);
+      if (problem) {
+        showScreenshotProblem(problem);
+      } else {
+        setError(
+          err instanceof ApiError ? err.message : "Something went wrong. Please try again.",
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -458,22 +491,47 @@ export default function SellPage() {
             )}
           </div>
           <input
+            ref={screenshotInputRef}
             id="screenshot"
             type="file"
             accept="image/*"
+            aria-invalid={screenshotError ? true : undefined}
+            aria-describedby={screenshotError ? "screenshot-error" : undefined}
             onChange={handleFileChange}
             className="w-full rounded-lg border border-line bg-surface px-4 py-3 text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-gold file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-[#1a1408]"
           />
-          <p className="mt-1.5 text-xs text-muted">
-            {isScanning
-              ? "Scanning screenshot for details..."
-              : skipOcr
-                ? "Auto-fill skipped - fill in the details below yourself. We'll still check the ticket's barcode or QR code when you submit."
-                : scanNotice ??
-                  (category === "MOVIE"
-                    ? "We'll try to auto-fill the fields below from your screenshot."
-                    : "We'll check the ticket's barcode or QR code, but you'll need to fill in the details below yourself.")}
-          </p>
+          {screenshotError ? (
+            <div
+              ref={screenshotErrorRef}
+              id="screenshot-error"
+              role="alert"
+              className="mt-2 flex items-start gap-2 rounded-lg border border-[rgba(226,87,74,0.55)] bg-[rgba(226,87,74,0.1)] py-2 pl-3 pr-0.5 text-sm font-medium text-error"
+            >
+              <svg aria-hidden="true" viewBox="0 0 20 20" className="mt-0.5 h-5 w-5 shrink-0 fill-current">
+                <path d="M10 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16Zm0 11.5a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2ZM10 5a1 1 0 0 0-1 1v5a1 1 0 1 0 2 0V6a1 1 0 0 0-1-1Z" />
+              </svg>
+              <p className="flex-1 py-0.5">{screenshotError.message}</p>
+              <button
+                type="button"
+                onClick={() => setScreenshotError(null)}
+                aria-label="Dismiss this message"
+                className="-my-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-lg leading-none hover:bg-[rgba(226,87,74,0.15)]"
+              >
+                ×
+              </button>
+            </div>
+          ) : (
+            <p className="mt-1.5 text-xs text-muted">
+              {isScanning
+                ? "Scanning screenshot for details..."
+                : skipOcr
+                  ? "Auto-fill skipped - fill in the details below yourself. We'll still check the ticket's barcode or QR code when you submit."
+                  : scanNotice ??
+                    (category === "MOVIE"
+                      ? "We'll try to auto-fill the fields below from your screenshot."
+                      : "We'll check the ticket's barcode or QR code, but you'll need to fill in the details below yourself.")}
+            </p>
+          )}
         </div>
 
         <div>
