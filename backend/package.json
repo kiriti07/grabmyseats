@@ -10,6 +10,8 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "migrate:new": "prisma migrate dev --create-only && npm run check:migrations",
+    "check:migrations": "ts-node --transpile-only scripts/checkMigrations.ts",
     "seed:admin": "ts-node --transpile-only scripts/seedAdmin.ts",
     "test": "vitest run"
   },
