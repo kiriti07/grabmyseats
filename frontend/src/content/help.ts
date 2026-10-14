@@ -15,7 +15,7 @@ Need help with GrabMySeats? Find answers below, or contact us.
 ## Contact us
 - Email: support@grabmyseats.com
 - Brilliant Eight, Gachibowli, Hyderabad, India
-- We aim to reply within [RESPONSE TIME, e.g. 2 business days].
+- We aim to reply within 2 business days.
 - When you write, please include the email address or phone number on your account and, if it's about a listing, the event name and date. Never send us your sign-in code.
 
 ## Getting started
@@ -64,7 +64,7 @@ Listings expire automatically after the event's date and time.
 Use the search bar, pick your city and category, and browse listings near you.
 
 ### How do I contact a seller?
-Open a listing and tap Contact. You then see the seller's contact details. You need to be signed in to see listings.
+Open a listing and tap "Get seller's contact info". You then see the seller's contact details. You need to be signed in to see listings.
 
 ### How do I stay safe?
 - Meet in a public place.
@@ -79,10 +79,10 @@ Use Notify me to get an alert when tickets that match your search are listed.
 
 ## Reporting a problem
 ### How do I report a user?
-Open the user's profile or listing and use Report. Describe what happened. You can attach screenshots as proof. We review reports and may suspend accounts that break our Terms.
+After you tap "Get seller's contact info", tap "Report this user" on that screen or on the transaction screen. Describe what happened. You can attach screenshots as proof. We review reports and may suspend accounts that break our Terms.
 
 ### How do ratings work?
-After you deal with someone, you can rate them. Ratings help other users decide who to trust.
+Only buyers rate sellers. After you get a seller's contact info, you can rate that seller from My Purchases. Ratings help other users decide who to trust.
 
 ## Your account
 ### How do I update my details?
@@ -92,7 +92,7 @@ Go to Account to edit your name, photo and other profile details.
 It shows that the person has confirmed their email address or phone number.
 
 ### How does the referral code work?
-Share your referral link or code. When someone signs up with it, you earn points. Points are tracked in your account. [REWARDS STATUS: say what points can be used for today, or that rewards are coming soon.]
+Share your referral link or code. Signing up alone doesn't earn points: a referral counts once the person you referred lists a ticket or gets a seller's contact info, and each person counts only once. You earn 200 points for every 20 referrals that count. Points are tracked in your account. Rewards are coming soon.
 
 ### How do I delete my account?
 Go to Account, then Delete my account. You can also read what we delete and what we keep at /delete-account, or email support@grabmyseats.com.
