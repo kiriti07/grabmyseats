@@ -19,7 +19,11 @@ export async function attachUser(
       // login is switched on (lib/reviewAccess.ts) - unsetting
       // REVIEW_EMAIL/REVIEW_OTP ends any reviewer session still in its
       // 30-day lifetime, not just new logins.
-      if (user && (!user.isReviewAccount || isActiveReviewAccount(user))) req.user = user;
+      // A deleted account (lib/accountDeletion.ts) never signs in again -
+      // this ends any session it still had.
+      if (user && !user.deletedAt && (!user.isReviewAccount || isActiveReviewAccount(user))) {
+        req.user = user;
+      }
     }
   } catch {
     // Malformed/expired token: proceed unauthenticated.

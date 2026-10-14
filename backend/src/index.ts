@@ -7,6 +7,7 @@ import { smsProviderName } from "./lib/sms";
 import { requirePhoneVerification } from "./lib/config";
 import { checkReviewLoginConfigAtStartup } from "./lib/reviewAccess";
 import { isTicketFingerprintConfigured } from "./lib/ticketFingerprint";
+import { isIdentifierHashConfigured } from "./lib/identifierHash";
 
 // Fails loud instead of silently ignoring a leftover dev-only env var that
 // would otherwise let anyone sign in as any email address in production.
@@ -53,6 +54,12 @@ if (process.env.NODE_ENV === "production" && emailProviderName === "console") {
 // there is deliberately no fallback secret - refuse to boot without one.
 if (process.env.NODE_ENV === "production" && !isTicketFingerprintConfigured()) {
   throw new Error("TICKET_FINGERPRINT_SECRET must be set (32+ characters) when NODE_ENV=production");
+}
+
+// Deleting a suspended account stores a keyed hash of its email/phone so it
+// can't simply sign up again (lib/identifierHash.ts) - same no-fallback rule.
+if (process.env.NODE_ENV === "production" && !isIdentifierHashConfigured()) {
+  throw new Error("IDENTIFIER_HASH_SECRET must be set (32+ characters) when NODE_ENV=production");
 }
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;

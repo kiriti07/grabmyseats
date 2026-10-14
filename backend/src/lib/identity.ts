@@ -1,6 +1,7 @@
 import type { Prisma, User } from "../generated/prisma/client";
 import { prisma } from "./prisma";
 import type { IdentifierChannel } from "./validators";
+import { findSuspendedIdentifierBlock, SuspendedIdentifierError } from "./suspendedIdentifiers";
 
 // An identifier - email or phone - is a login identity only once it's
 // verified (emailVerifiedAt / phoneVerifiedAt set). Unverified ones are just
@@ -68,7 +69,9 @@ export async function clearUnverifiedClaims(
 // caller who has just proven they own it. The proven owner wins over any
 // other account's unverified claim (cleared), but never over another
 // account that has itself already verified it - that throws, since two
-// accounts can't share a login identity.
+// accounts can't share a login identity. Also throws
+// SuspendedIdentifierError for an identifier of a deleted, suspended
+// account (lib/accountDeletion.ts), so it can't be moved onto a new one.
 export function claimVerifiedIdentifier(
   userId: string,
   channel: IdentifierChannel,
@@ -77,6 +80,8 @@ export function claimVerifiedIdentifier(
   return prisma.$transaction(async (tx) => {
     const owner = await findUserByVerifiedIdentifier(channel, value, tx);
     if (owner && owner.id !== userId) throw new IdentifierOwnedByAnotherAccountError();
+    const block = await findSuspendedIdentifierBlock(channel, value, tx);
+    if (block) throw new SuspendedIdentifierError(block.reason);
 
     await clearUnverifiedClaims(tx, channel, value, userId);
     return tx.user.update({

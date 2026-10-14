@@ -16,6 +16,9 @@ export default defineConfig({
     env: {
       TICKET_FINGERPRINT_SECRET:
         process.env.TICKET_FINGERPRINT_SECRET ?? "test-only-ticket-fingerprint-secret-0123456789",
+      // Same for the deleted-account identifier hash (lib/identifierHash.ts).
+      IDENTIFIER_HASH_SECRET:
+        process.env.IDENTIFIER_HASH_SECRET ?? "test-only-identifier-hash-secret-0123456789abc",
     },
   },
 });

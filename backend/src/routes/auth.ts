@@ -35,6 +35,7 @@ import {
   consumePendingSignupToken,
   issuePendingSignupToken,
 } from "../lib/pendingSignupStore";
+import { findSuspendedIdentifierBlock, SuspendedIdentifierError } from "../lib/suspendedIdentifiers";
 
 export const authRouter = Router();
 
@@ -95,9 +96,10 @@ async function findReferrerId(ref: unknown): Promise<string | null> {
   if (!refCode) return null;
   const referrer = await prisma.user.findUnique({
     where: { referralCode: refCode },
-    select: { id: true },
+    select: { id: true, deletedAt: true },
   });
-  return referrer?.id ?? null;
+  // A deleted account's code was replaced at deletion, but never credit one.
+  return referrer && !referrer.deletedAt ? referrer.id : null;
 }
 
 // Creates an account for an identifier the caller has just proven they own
@@ -105,7 +107,8 @@ async function findReferrerId(ref: unknown): Promise<string | null> {
 // claim on it (the proven owner wins). If someone verified it in the
 // meantime, that account is returned instead, as a login. ?ref= is only
 // ever applied here, to a brand-new account - never backfilled onto an
-// existing one logging back in.
+// existing one logging back in. Throws SuspendedIdentifierError for an
+// identifier of a deleted, suspended account (lib/accountDeletion.ts).
 async function createAccountForVerifiedIdentifier(
   input: IdentifierInput,
   ref: unknown,
@@ -118,6 +121,9 @@ async function createAccountForVerifiedIdentifier(
     return await prisma.$transaction(async (tx) => {
       const owner = await findUserByVerifiedIdentifier(input.channel, input.value, tx);
       if (owner) return { user: owner, isNewAccount: false };
+
+      const block = await findSuspendedIdentifierBlock(input.channel, input.value, tx);
+      if (block) throw new SuspendedIdentifierError(block.reason);
 
       await clearUnverifiedClaims(tx, input.channel, input.value, null);
       const user = await tx.user.create({
@@ -184,6 +190,25 @@ async function completeLogin(
     data: { user: toSharedUser(loggedInUser), token, isNewAccount },
   };
   res.json(body);
+}
+
+// The new account would belong to someone whose account was suspended and
+// then deleted - refused with that suspension's own message.
+async function createAccountOrRefuse(
+  res: Response,
+  input: IdentifierInput,
+  ref: unknown,
+): Promise<void> {
+  let result;
+  try {
+    result = await createAccountForVerifiedIdentifier(input, ref);
+  } catch (err) {
+    if (!(err instanceof SuspendedIdentifierError)) throw err;
+    const body: ApiResponse<never> = { success: false, error: err.message };
+    res.status(403).json(body);
+    return;
+  }
+  await completeLogin(res, result.user, result.isNewAccount);
 }
 
 function invalidCode(res: Response): void {
@@ -268,8 +293,7 @@ authRouter.post("/otp/verify", otpVerifyLimiter, async (req: Request, res: Respo
     return;
   }
 
-  const { user, isNewAccount } = await createAccountForVerifiedIdentifier(input, req.body?.ref);
-  await completeLogin(res, user, isNewAccount);
+  await createAccountOrRefuse(res, input, req.body?.ref);
 });
 
 // "Create an account?" after a sign-in found none - { signupToken, ref? }.
@@ -287,8 +311,7 @@ authRouter.post("/signup/confirm", async (req, res) => {
     return;
   }
 
-  const { user, isNewAccount } = await createAccountForVerifiedIdentifier(input, req.body?.ref);
-  await completeLogin(res, user, isNewAccount);
+  await createAccountOrRefuse(res, input, req.body?.ref);
 });
 
 // One-time onboarding step immediately after a brand-new signup (see
