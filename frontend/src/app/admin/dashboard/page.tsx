@@ -29,7 +29,7 @@ export default function AdminDashboardPage() {
         <h2 className="mb-3 text-base font-semibold text-foreground">
           Suspend / unsuspend a user
         </h2>
-        <UserSuspendPanel />
+        <UserSuspendPanel canDelete={isAdmin} />
       </section>
 
       <section>

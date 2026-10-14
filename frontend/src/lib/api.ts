@@ -1,4 +1,5 @@
 import type {
+  AccountDeleteCodeResult,
   ApiResponse,
   AuthOptions,
   IdentifierChannel,
@@ -356,6 +357,20 @@ export function requestIdentifierClaimCode(
   return request("/api/users/me/identifiers/claim/request", {
     method: "POST",
     body: JSON.stringify({ channel, identifier }),
+  });
+}
+
+// Account deletion - see /account/delete. The code (when the account has a
+// verified channel) goes to the account's own email/phone; the server
+// decides whether one is needed.
+export function sendDeleteAccountCode(): Promise<AccountDeleteCodeResult> {
+  return request("/api/users/me/delete/send-code", { method: "POST" });
+}
+
+export function deleteMyAccount(code: string | null): Promise<{ deleted: true }> {
+  return request("/api/users/me", {
+    method: "DELETE",
+    body: JSON.stringify({ confirm: "DELETE", ...(code ? { code } : {}) }),
   });
 }
 

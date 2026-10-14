@@ -230,6 +230,10 @@ export default function AccountPage() {
         >
           Log out
         </button>
+
+        <Link href="/account/delete" className="mt-4 text-xs font-medium text-error hover:underline">
+          Delete my account
+        </Link>
       </div>
     </main>
   );

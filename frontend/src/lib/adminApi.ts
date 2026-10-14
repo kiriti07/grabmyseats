@@ -119,6 +119,13 @@ export function suspendUser(id: string, reason: string): Promise<{ user: AdminUs
   });
 }
 
+// The one ADMIN-only action in this section - deletes a customer's account
+// on their behalf (backend lib/accountDeletion.ts), for deletion requests
+// made by email and for suspended users.
+export function deleteUserAccount(id: string): Promise<{ user: AdminUserSummary }> {
+  return adminRequest(`/api/admin/users/${id}/delete`, { method: "POST" });
+}
+
 export function unsuspendUser(id: string): Promise<{ user: AdminUserSummary }> {
   return adminRequest(`/api/admin/users/${id}/unsuspend`, { method: "POST" });
 }

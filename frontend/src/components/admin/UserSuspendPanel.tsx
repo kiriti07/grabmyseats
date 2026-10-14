@@ -4,20 +4,24 @@ import { useState } from "react";
 import type { AdminUserSummary } from "@grabmyseats/shared";
 import { AdminButton } from "@/components/admin/AdminButton";
 import { ErrorText } from "@/components/ui/ErrorText";
-import { ApiError, lookupUser, suspendUser, unsuspendUser } from "@/lib/adminApi";
+import { ApiError, deleteUserAccount, lookupUser, suspendUser, unsuspendUser } from "@/lib/adminApi";
 
 // SUPPORT and ADMIN both use this - staff only ever have a phone number or
 // email address to go on for a user they're acting on (same reason
 // TransactionContact never carries a user id), so lookup by either is the
 // entry point. Anything containing "@" is looked up as an email; both are
 // exact matches on what's stored (emails are stored lowercase).
-export function UserSuspendPanel() {
+// canDelete (ADMIN only - the backend enforces it too) adds deleting the
+// account on the user's behalf: for deletion requests made by email, and
+// for suspended users, who can't sign in to do it themselves.
+export function UserSuspendPanel({ canDelete = false }: { canDelete?: boolean }) {
   const [query, setQuery] = useState("");
   const [user, setUser] = useState<AdminUserSummary | null | undefined>(undefined);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [isActing, setIsActing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   async function handleLookup() {
     const trimmed = query.trim();
@@ -30,6 +34,7 @@ export function UserSuspendPanel() {
       );
       setUser(user);
       setReason("");
+      setConfirmingDelete(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Lookup failed.");
       setUser(undefined);
@@ -66,6 +71,21 @@ export function UserSuspendPanel() {
     }
   }
 
+  async function handleDelete() {
+    if (!user) return;
+    setError(null);
+    setIsActing(true);
+    try {
+      const { user: updated } = await deleteUserAccount(user.id);
+      setUser(updated);
+      setConfirmingDelete(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't delete this account.");
+    } finally {
+      setIsActing(false);
+    }
+  }
+
   return (
     <div className="rounded-lg border border-line bg-surface p-4">
       <div className="flex gap-2">
@@ -95,7 +115,12 @@ export function UserSuspendPanel() {
           {user.email && <p className="text-sm text-muted">{user.email}</p>}
           {user.phone && <p className="text-sm text-muted">{user.phone} (unverified)</p>}
 
-          {user.suspendedAt ? (
+          {user.deletedAt ? (
+            <p className="mt-3 text-sm text-muted">
+              Account deleted {new Date(user.deletedAt).toLocaleDateString()}
+              {user.suspendedAt && ` - was suspended: ${user.suspensionReason}`}
+            </p>
+          ) : user.suspendedAt ? (
             <div className="mt-3">
               <p className="text-sm text-error">Suspended: {user.suspensionReason}</p>
               <AdminButton
@@ -125,6 +150,31 @@ export function UserSuspendPanel() {
               >
                 Suspend
               </AdminButton>
+            </div>
+          )}
+
+          {canDelete && !user.deletedAt && (
+            <div className="mt-4 border-t border-line pt-3">
+              {confirmingDelete ? (
+                <>
+                  <p className="text-sm text-error">
+                    Permanently delete this account? Personal details are erased; reports and any
+                    suspension are kept for 3 years.
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <AdminButton variant="danger" onClick={handleDelete} isLoading={isActing}>
+                      Delete permanently
+                    </AdminButton>
+                    <AdminButton variant="plain" onClick={() => setConfirmingDelete(false)}>
+                      Cancel
+                    </AdminButton>
+                  </div>
+                </>
+              ) : (
+                <AdminButton variant="plain" onClick={() => setConfirmingDelete(true)}>
+                  Delete account…
+                </AdminButton>
+              )}
             </div>
           )}
         </div>
