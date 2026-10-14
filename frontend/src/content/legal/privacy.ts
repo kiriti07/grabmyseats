@@ -64,7 +64,8 @@ We may also disclose information if the law requires it, to respond to legal req
 - We keep your account data while your account is active.
 - Listings are removed from view when they expire or are withdrawn.
 - When you delete your account, we delete or anonymise your personal data, including your profile details, contact details, listings activity, alerts and referral links. Listing views and contacts linked to you are deleted.
-- We keep reports and suspension records, and the following for accounts that were suspended when deleted, for 3 years, to prevent fraud and to stop suspended users from returning: a one-way hash (an irreversible code) of the email address and phone number, which we cannot turn back into the original details. After 3 years these records are deleted.
+- We keep reports and suspension records about a deleted account, and the following for accounts that were suspended when deleted, for 3 years, to prevent fraud and to stop suspended users from returning: a one-way hash (an irreversible code) of the email address and phone number, which we cannot turn back into the original details. After 3 years these records are deleted.
+- Reports you made about other users stay with those users' records, because they are part of those users' safety history.
 - Technical logs are kept for a limited time.
 
 ## 6. Your choices and rights
