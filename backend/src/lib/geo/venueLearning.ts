@@ -1,5 +1,6 @@
 import { cityIdForName, isWithinCityBounds } from "@grabmyseats/shared";
 import { prisma } from "../prisma";
+import { isNearCityCenter } from "./cityCenter";
 import { haversineDistanceMeters } from "./haversine";
 import { normalizeVenueText, parseTheaterName } from "./venueQueries";
 
@@ -12,6 +13,7 @@ export const SELLERS_REQUIRED_TO_MOVE = 3;
 export type VenueLearningOutcome =
   | "skipped_approximate"
   | "skipped_unknown_city"
+  | "skipped_city_center"
   | "skipped_no_name"
   | "rejected_out_of_bounds"
   | "created"
@@ -57,6 +59,8 @@ function agreeingGroup(pins: Pin[]): Pin[] | null {
 // - An approximate pin the seller didn't move (a locality centroid) is
 //   never learned.
 // - A pin outside the selected city's bounding area is refused.
+// - A pin on the city's center point (the sell form's map start, never
+//   moved) is never learned - see lib/geo/cityCenter.ts.
 // - A new name+locality creates the venue at this pin.
 // - For an existing venue, the seller's vote is recorded (latest pin per
 //   seller); the venue only moves when SELLERS_REQUIRED_TO_MOVE different
@@ -74,6 +78,7 @@ export async function learnVenuePin(input: {
   const cityId = cityIdForName(input.cityName);
   if (!cityId) return "skipped_unknown_city";
   if (!isWithinCityBounds(cityId, input.lat, input.lng)) return "rejected_out_of_bounds";
+  if (isNearCityCenter(cityId, input.lat, input.lng)) return "skipped_city_center";
 
   const parsed = parseTheaterName(input.theaterName);
   const normalizedName = normalizeVenueText(parsed.name);

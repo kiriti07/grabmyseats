@@ -2,8 +2,9 @@ import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import request from "supertest";
-import { INDIAN_METRO_CITIES } from "@grabmyseats/shared";
+import { INDIAN_METRO_CITIES, VENUE_PICKER_CENTER_OVERRIDES } from "@grabmyseats/shared";
 import { app } from "../app";
+import { learnVenuePin } from "../lib/geo/venueLearning";
 import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
 import { ticketImage } from "../test/ticketImage";
@@ -20,6 +21,7 @@ describe("listing location precision", () => {
   const KOKAPET = { lat: 17.3916, lng: 78.3226 };
   const GACHIBOWLI = { lat: 17.4401, lng: 78.3489 };
   const MUMBAI = { lat: 19.076, lng: 72.8777 };
+  const PICKER_START = VENUE_PICKER_CENTER_OVERRIDES.hyderabad;
 
   const userIds: string[] = [];
   const listingIds: string[] = [];
@@ -223,6 +225,65 @@ describe("listing location precision", () => {
       });
       listingIds.push(listing.id);
       expect(listing.locationPrecision).toBe("CITY");
+    });
+  });
+
+  // The sell form's venue map starts on the city center when nothing was
+  // found; a seller who confirms without moving it hasn't placed the venue.
+  describe("a city-center pin is never EXACT, and never learned", () => {
+    async function venuesNamed(name: string) {
+      return prisma.venue.count({ where: { normalizedName: { contains: name } } });
+    }
+
+    it.each([
+      ["the city's centroid", () => ({ lat: HYDERABAD.lat, lng: HYDERABAD.lng })],
+      ["the venue map's starting point", () => PICKER_START],
+      ["a few meters off the starting point", () => ({ lat: PICKER_START.lat + 0.0001, lng: PICKER_START.lng })],
+    ])("pinned on %s", async (_label, pin) => {
+      const name = `centerpin${randomUUID().slice(0, 8)}`;
+      const res = await createListing({ theaterName: `${name} ${TAG}`, city: "Hyderabad", pin: pin() });
+      expect(res.status).toBe(201);
+      expect(res.body.data.listing.locationPrecision).not.toBe("EXACT");
+      expect(res.body.data.listing.locationPrecision).toBe("CITY");
+      expect(await venuesNamed(name)).toBe(0);
+    });
+
+    it("a Venue row already sitting on the city center is not served as EXACT", async () => {
+      await prisma.venue.create({
+        data: {
+          normalizedName: `poisoned cinemas ${TAG}`,
+          locality: "",
+          displayName: "Poisoned Cinemas",
+          cityId: "hyderabad",
+          ...PICKER_START,
+          source: "SELLER_CONFIRMED",
+        },
+      });
+      const res = await createListing({ theaterName: `Poisoned Cinemas ${TAG}`, city: "Hyderabad" });
+      expect(res.status).toBe(201);
+      expect(res.body.data.listing.locationPrecision).not.toBe("EXACT");
+    });
+
+    it("learnVenuePin refuses it directly", async () => {
+      for (const at of [{ lat: HYDERABAD.lat, lng: HYDERABAD.lng }, PICKER_START]) {
+        const name = `learncenter${randomUUID().slice(0, 8)}`;
+        const outcome = await learnVenuePin({
+          userId: userIds[0],
+          theaterName: `${name} ${TAG}`,
+          cityName: "Hyderabad",
+          ...at,
+          approximate: false,
+        });
+        expect(outcome).toBe("skipped_city_center");
+        expect(await venuesNamed(name)).toBe(0);
+      }
+    });
+
+    it("a pin the seller actually moved is still EXACT and learned", async () => {
+      const name = `movedpin${randomUUID().slice(0, 8)}`;
+      const res = await createListing({ theaterName: `${name} ${TAG}`, city: "Hyderabad", pin: GACHIBOWLI });
+      expect(res.body.data.listing).toMatchObject({ locationPrecision: "EXACT", theaterLat: GACHIBOWLI.lat });
+      expect(await venuesNamed(name)).toBe(1);
     });
   });
 

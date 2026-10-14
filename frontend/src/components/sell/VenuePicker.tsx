@@ -15,7 +15,9 @@ export type VenuePickerMode = "notFound" | "approximate" | "adjust";
 // server places venues on its own otherwise (resolveListingLocation). The
 // seller places or corrects the venue pin. Leaflet + OpenStreetMap
 // tiles - free, no API key (see backend/src/lib/geocode.ts). Three modes:
-// - "notFound": nothing resolved; starts at the city center.
+// - "notFound": nothing resolved; starts at the city center, and can't be
+//   confirmed until the seller drags the pin or a search finds the venue -
+//   the city center says nothing about where the venue is.
 // - "approximate": only the locality resolved (e.g. Kokapet); starts there,
 //   labelled approximate until the seller drags the pin onto the venue.
 // - "adjust": the venue was found; the seller is correcting its pin.
@@ -56,6 +58,7 @@ export function VenuePicker({
   const [position, setPosition] = useState(initialPosition ?? cityCenter);
   const [label, setLabel] = useState<string | null>(initialLabel ?? null);
   const [isApproximate, setIsApproximate] = useState(mode === "approximate");
+  const [pinPlaced, setPinPlaced] = useState(mode !== "notFound");
   const initialZoom = mode === "notFound" ? 14 : mode === "approximate" ? 15 : 16;
 
   useEffect(() => {
@@ -89,6 +92,7 @@ export function VenuePicker({
         setPosition({ lat, lng });
         setLabel(null);
         setIsApproximate(false);
+        setPinPlaced(true);
       });
 
       mapRef.current = map;
@@ -119,6 +123,7 @@ export function VenuePicker({
         moveMarkerTo({ lat: result.lat, lng: result.lng });
         setLabel(result.displayName);
         setIsApproximate(result.approximate);
+        setPinPlaced(true);
       } else {
         setSearchError("Still couldn't find that. Try adjusting the pin on the map below.");
       }
@@ -169,12 +174,17 @@ export function VenuePicker({
 
       <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
         {isApproximate && <ApproximateBadge />}
-        {label ? `Selected: ${label}` : "Custom pinned location - drag to adjust"}
+        {!pinPlaced
+          ? "Drag the pin onto the venue first"
+          : label
+            ? `Selected: ${label}`
+            : "Custom pinned location - drag to adjust"}
       </p>
 
       <div className="mt-3">
         <Button
           type="button"
+          disabled={!pinPlaced}
           onClick={() =>
             onConfirm(position, label ?? "Custom pinned location", { approximate: isApproximate })
           }

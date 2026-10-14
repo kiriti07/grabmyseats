@@ -7,6 +7,7 @@ import {
 import type { GeocodePreview, LocationPrecision } from "@grabmyseats/shared";
 import { prisma } from "../prisma";
 import { nominatimSearch, type NominatimPlace } from "../geocode";
+import { isNearCityCenter } from "./cityCenter";
 import { buildVenueQueries, normalizeVenueText, parseTheaterName } from "./venueQueries";
 
 // Venue-table name similarity needed for a match (pg_trgm similarity, 0-1),
@@ -145,8 +146,14 @@ export async function lookupVenue(
       normalizeVenueText(parsed.name),
       normalizeVenueText(parsed.locality ?? ""),
     );
-    // A seeded row with bad coordinates is ignored, not trusted.
-    if (match && isWithinCityBounds(cityId, match.lat, match.lng)) {
+    // A row with bad coordinates is ignored, not trusted: outside the city,
+    // or on the city's center point - where an unmoved map pin left it
+    // before such pins stopped being learned (see lib/geo/cityCenter.ts).
+    if (
+      match &&
+      isWithinCityBounds(cityId, match.lat, match.lng) &&
+      !isNearCityCenter(cityId, match.lat, match.lng)
+    ) {
       return {
         ...base,
         found: true,
@@ -212,7 +219,8 @@ const LISTING_LOOKUP_BUDGET_MS = 4000;
 
 // Where a new listing goes, for POST /api/listings. Never fails - every
 // step that can't produce an in-city location just falls through:
-// 1. a pin the seller confirmed, inside the city's bounds -> EXACT;
+// 1. a pin the seller confirmed, inside the city's bounds and not left on
+//    the city's center point (see lib/geo/cityCenter.ts) -> EXACT;
 // 2. the Venue table, or exactly one matching OSM cinema -> EXACT;
 // 3. the venue's locality (place/district/mall) -> AREA;
 // 4. the city center -> CITY.
@@ -227,7 +235,11 @@ export async function resolveListingLocation(input: {
   const city = INDIAN_METRO_CITIES.find((c) => c.id === cityId);
   if (!cityId || !city) return null;
 
-  if (input.pin && isWithinCityBounds(cityId, input.pin.lat, input.pin.lng)) {
+  if (
+    input.pin &&
+    isWithinCityBounds(cityId, input.pin.lat, input.pin.lng) &&
+    !isNearCityCenter(cityId, input.pin.lat, input.pin.lng)
+  ) {
     return { ...input.pin, precision: "EXACT", cityId, source: "seller" };
   }
 

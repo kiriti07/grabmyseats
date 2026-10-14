@@ -56,3 +56,14 @@ export const INDIAN_METRO_CITIES: IndianMetroCity[] = [
   { id: "pune", name: "Pune", lat: 18.5204, lng: 73.8567 },
   { id: "ahmedabad", name: "Ahmedabad", lat: 23.0225, lng: 72.5714 },
 ];
+
+// Where the sell form's manual venue map starts when nothing was found, for
+// cities whose INDIAN_METRO_CITIES centroid sits far from where venues
+// actually are. Hyderabad's centroid is in the old city/Koti area, ~15-20km
+// from the western IT corridor (Gachibowli/HITEC City/Kokapet) where many
+// venues are - Banjara Hills roughly halves that gap. The backend needs
+// these too: a pin left on either point wasn't placed by the seller (see
+// backend lib/geo/cityCenter.ts).
+export const VENUE_PICKER_CENTER_OVERRIDES: Record<string, { lat: number; lng: number }> = {
+  hyderabad: { lat: 17.4126, lng: 78.4482 },
+};
