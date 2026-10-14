@@ -4,6 +4,7 @@ import { expireListings } from "./expireListings";
 import { autoConfirmStaleEscrows } from "./autoConfirmStaleEscrows";
 import { releasePayouts } from "./releasePayouts";
 import { matchAlerts } from "./matchAlerts";
+import { purgeDeletedAccountRecords } from "./purgeDeletedAccountRecords";
 import { PAYMENT_MODE } from "../lib/config";
 
 export function startJobs(): void {
@@ -79,5 +80,26 @@ export function startJobs(): void {
       }
     },
     { name: "match-alerts", noOverlap: true },
+  );
+
+  // Daily: ends the 3-year retention of deleted accounts' fraud-prevention
+  // records (identifier hashes, suspension, reports against them).
+  schedule(
+    "30 3 * * *",
+    async () => {
+      try {
+        const { identifierHashes, suspensionRecords, reportsAgainst } =
+          await purgeDeletedAccountRecords();
+        if (identifierHashes + suspensionRecords + reportsAgainst > 0) {
+          console.log(
+            `[jobs] purged deleted-account records: ${identifierHashes} hash(es), ` +
+              `${suspensionRecords} suspension(s), ${reportsAgainst} report(s)`,
+          );
+        }
+      } catch (err) {
+        console.error("[jobs] purgeDeletedAccountRecords failed", err);
+      }
+    },
+    { name: "purge-deleted-account-records", noOverlap: true },
   );
 }

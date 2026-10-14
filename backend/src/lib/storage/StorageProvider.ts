@@ -14,4 +14,8 @@ export interface StorageProvider {
     filename: string,
     options?: StorageProviderUploadOptions,
   ): Promise<{ url: string }>;
+  // Permanently removes a file this provider stored, by the url upload()
+  // returned. Refuses (throws) a url it didn't produce, rather than
+  // guessing - used by account deletion (lib/accountDeletion.ts).
+  delete(url: string): Promise<void>;
 }

@@ -34,3 +34,9 @@ export async function verifyOtp(identifier: string, code: string): Promise<boole
 
   return stored === code;
 }
+
+// Drops a pending code without using it - account deletion clears the
+// deleted account's outstanding codes.
+export async function discardOtp(identifier: string): Promise<void> {
+  await redis.del(otpKey(identifier));
+}

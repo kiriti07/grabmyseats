@@ -47,6 +47,9 @@ export interface AdminUserSummary {
   fullName: string | null;
   suspendedAt: string | null;
   suspensionReason: string | null;
+  // Set once the account was deleted (backend lib/accountDeletion.ts) -
+  // every personal field above is then null.
+  deletedAt: string | null;
   createdAt: string;
 }
 

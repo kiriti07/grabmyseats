@@ -37,4 +37,27 @@ export class CloudinaryStorageProvider implements StorageProvider {
 
     return { url: result.secure_url };
   }
+
+  async delete(url: string): Promise<void> {
+    const { publicId, resourceType } = parseCloudinaryUrl(url);
+    const result = (await cloudinary.uploader.destroy(publicId, {
+      resource_type: resourceType,
+      invalidate: true,
+    })) as { result?: string };
+    // "not found" is fine - it's already gone.
+    if (result?.result !== "ok" && result?.result !== "not found") {
+      throw new Error(`Cloudinary delete failed: ${result?.result ?? "no result"}`);
+    }
+  }
+}
+
+// https://res.cloudinary.com/<cloud>/<image|raw>/upload/[v123/]grabmyseats/<folder>/<id>.<ext>
+// -> public id "grabmyseats/<folder>/<id>" (raw files keep their extension
+// in the public id). Only ever files under our own grabmyseats/ root.
+export function parseCloudinaryUrl(url: string): { publicId: string; resourceType: "image" | "raw" } {
+  const match = /^https:\/\/res\.cloudinary\.com\/[^/]+\/(image|raw)\/upload\/(?:v\d+\/)?(grabmyseats\/.+)$/.exec(url);
+  if (!match) throw new Error("Not a GrabMySeats Cloudinary url");
+  const resourceType = match[1] as "image" | "raw";
+  const path = decodeURIComponent(match[2]);
+  return { publicId: resourceType === "raw" ? path : path.replace(/\.[^./]+$/, ""), resourceType };
 }

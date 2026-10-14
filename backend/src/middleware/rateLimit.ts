@@ -186,3 +186,28 @@ export const adminLoginLimiter = rateLimit({
     res.status(429).json(body);
   },
 });
+
+// Account deletion's confirmation code (POST /api/users/me/delete/send-code
+// and DELETE /api/users/me). Keyed per user - the code always goes to the
+// account's own verified email/phone, never to an address the caller picks
+// - with the same budgets as the login OTP: 3 sends per 10 minutes, 10
+// attempts an hour. Mount after requireAuth.
+export const accountDeleteCodeLimiter = rateLimit({
+  windowMs: 10 * MINUTE,
+  limit: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new RedisStore({ sendCommand, prefix: "rl:account-delete-code:" }),
+  keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? "unknown"),
+  handler: sendOtpRateLimited,
+});
+
+export const accountDeleteVerifyLimiter = rateLimit({
+  windowMs: HOUR,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new RedisStore({ sendCommand, prefix: "rl:account-delete-verify:" }),
+  keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? "unknown"),
+  handler: sendOtpRateLimited,
+});

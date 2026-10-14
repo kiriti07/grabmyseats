@@ -19,6 +19,11 @@ import {
 import { requireAdminAuth, requireRole } from "../middleware/adminAuth";
 import { payoutProvider } from "../lib/payments";
 import { releaseListingSeats } from "../lib/listingSeats";
+import {
+  AccountAlreadyDeletedError,
+  AccountNotFoundError,
+  deleteUserAccount,
+} from "../lib/accountDeletion";
 
 export const adminRouter = Router();
 
@@ -97,6 +102,15 @@ adminRouter.get(
 
 class UserNotFoundError extends Error {}
 class UserNotSuspendedError extends Error {}
+// A deleted account (lib/accountDeletion.ts) is an anonymous record: its
+// suspension state is a kept fraud-prevention record, not something staff
+// change any more.
+class UserDeletedError extends Error {}
+
+function userDeleted(res: import("express").Response): void {
+  const body: ApiResponse<never> = { success: false, error: "This account has been deleted" };
+  res.status(409).json(body);
+}
 
 // Suspends a user outright, independent of any specific fraud report (an
 // admin might act on something reported outside the app entirely). See
@@ -120,6 +134,7 @@ adminRouter.post(
     try {
       const existing = await prisma.user.findUnique({ where: { id: userId } });
       if (!existing) throw new UserNotFoundError();
+      if (existing.deletedAt) throw new UserDeletedError();
 
       const updated = await prisma.user.update({
         where: { id: userId },
@@ -135,6 +150,10 @@ adminRouter.post(
       if (err instanceof UserNotFoundError) {
         const body: ApiResponse<never> = { success: false, error: "User not found" };
         res.status(404).json(body);
+        return;
+      }
+      if (err instanceof UserDeletedError) {
+        userDeleted(res);
         return;
       }
       throw err;
@@ -156,6 +175,7 @@ adminRouter.post(
     try {
       const existing = await prisma.user.findUnique({ where: { id: userId } });
       if (!existing) throw new UserNotFoundError();
+      if (existing.deletedAt) throw new UserDeletedError();
       if (!existing.suspendedAt) throw new UserNotSuspendedError();
 
       const updated = await prisma.user.update({
@@ -174,6 +194,10 @@ adminRouter.post(
         res.status(404).json(body);
         return;
       }
+      if (err instanceof UserDeletedError) {
+        userDeleted(res);
+        return;
+      }
       if (err instanceof UserNotSuspendedError) {
         const body: ApiResponse<never> = { success: false, error: "User is not suspended" };
         res.status(409).json(body);
@@ -181,6 +205,45 @@ adminRouter.post(
       }
       throw err;
     }
+  },
+);
+
+// Deletes a customer account on the user's behalf (lib/accountDeletion.ts,
+// same as their own DELETE /api/users/me) - for deletion requests made by
+// email from the account's address or number (see the public
+// /delete-account page), and for suspended users, who can't sign in to do
+// it themselves. ADMIN only. Logged as acting admin id + user id, so every
+// staff deletion is attributable - and nothing else, so nothing personal
+// (a request often quotes the user's email) ends up in the logs.
+adminRouter.post(
+  "/users/:id/delete",
+  requireAdminAuth,
+  requireRole(["ADMIN"]),
+  async (req, res) => {
+    const userId = req.params.id as string;
+
+    try {
+      await deleteUserAccount(userId);
+    } catch (err) {
+      if (err instanceof AccountNotFoundError) {
+        const body: ApiResponse<never> = { success: false, error: "User not found" };
+        res.status(404).json(body);
+        return;
+      }
+      if (err instanceof AccountAlreadyDeletedError) {
+        userDeleted(res);
+        return;
+      }
+      throw err;
+    }
+
+    console.warn(`[account-deletion] admin ${req.adminUser!.id} deleted user ${userId}`);
+    const deleted = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const body: ApiResponse<{ user: AdminUserSummary }> = {
+      success: true,
+      data: { user: toAdminUserSummary(deleted) },
+    };
+    res.json(body);
   },
 );
 
@@ -229,6 +292,11 @@ adminRouter.post(
       }
 
       if (suspend) {
+        const reported = await tx.user.findUnique({
+          where: { id: existing.reportedUserId },
+          select: { deletedAt: true },
+        });
+        if (reported?.deletedAt) throw new UserDeletedError();
         await tx.user.update({
           where: { id: existing.reportedUserId },
           data: { suspendedAt: new Date(), suspensionReason: suspensionReason! },
@@ -258,6 +326,10 @@ adminRouter.post(
         error: "This report has already been resolved",
       };
       res.status(409).json(body);
+      return;
+    }
+    if (err instanceof UserDeletedError) {
+      userDeleted(res);
       return;
     }
     throw err;

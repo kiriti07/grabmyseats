@@ -132,3 +132,12 @@ export interface ReferralSummary {
   nextMilestoneAt: number;
   referralsUntilNextMilestone: number;
 }
+
+// POST /api/users/me/delete/send-code. channel null means the account has no
+// verified email/phone a code can reach (a phone-only account while SMS is
+// off) - typing DELETE is then the whole confirmation for DELETE
+// /api/users/me. destination is masked (e.g. "k•••@gmail.com").
+export interface AccountDeleteCodeResult {
+  channel: "email" | "phone" | null;
+  destination: string | null;
+}

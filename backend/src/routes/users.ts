@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import type {
+  AccountDeleteCodeResult,
   ApiResponse,
   RatingSummary,
   ReferralSummary,
@@ -31,12 +32,22 @@ import {
   isUniqueViolation,
 } from "../lib/identity";
 import {
+  accountDeleteCodeLimiter,
+  accountDeleteVerifyLimiter,
   otpIdentifierLimiter,
   otpIdentifierDailyLimiter,
   otpIpLimiter,
   otpGlobalLimiter,
   otpVerifyLimiter,
 } from "../middleware/rateLimit";
+import { SESSION_COOKIE_NAME } from "../lib/authConfig";
+import {
+  AccountAlreadyDeletedError,
+  deleteCodeChannel,
+  deleteOtpIdentifier,
+  deleteUserAccount,
+} from "../lib/accountDeletion";
+import { SuspendedIdentifierError } from "../lib/suspendedIdentifiers";
 import { LIVE_LISTING_STATUSES } from "@grabmyseats/shared";
 
 export const usersRouter = Router();
@@ -78,10 +89,15 @@ usersRouter.get("/me/profile", requireAuth, async (req, res) => {
 // profile page. No existence check on :id: a bogus/nonexistent id and a
 // real seller with zero ratings both just come back as "no ratings" -
 // deliberately indistinguishable, rather than a 404 that would let this
-// endpoint be used to probe which user ids exist.
+// endpoint be used to probe which user ids exist. A deleted account
+// (lib/accountDeletion.ts) answers the same "no ratings", for the same
+// reason - its ratings stay counted only in the raters' own history.
 usersRouter.get("/:id/rating-summary", async (req, res) => {
   const userId = req.params.id as string;
-  const summary = await getRatingSummary(userId);
+  const target = await prisma.user.findUnique({ where: { id: userId }, select: { deletedAt: true } });
+  const summary = target?.deletedAt
+    ? { averageStars: null, totalRatings: 0, recentComments: [] }
+    : await getRatingSummary(userId);
   const body: ApiResponse<RatingSummary> = { success: true, data: summary };
   res.json(body);
 });
@@ -323,6 +339,11 @@ usersRouter.get("/me/email/verify", async (req, res) => {
   try {
     updated = await claimVerifiedIdentifier(user.id, "email", user.email);
   } catch (err) {
+    if (err instanceof SuspendedIdentifierError) {
+      const body: ApiResponse<never> = { success: false, error: err.message };
+      res.status(403).json(body);
+      return;
+    }
     if (err instanceof IdentifierOwnedByAnotherAccountError || isUniqueViolation(err)) {
       const body: ApiResponse<never> = {
         success: false,
@@ -411,6 +432,11 @@ usersRouter.post("/me/identifiers/claim/verify", requireAuth, otpVerifyLimiter, 
     };
     res.json(body);
   } catch (err) {
+    if (err instanceof SuspendedIdentifierError) {
+      const body: ApiResponse<never> = { success: false, error: err.message };
+      res.status(403).json(body);
+      return;
+    }
     if (err instanceof IdentifierOwnedByAnotherAccountError || isUniqueViolation(err)) {
       const body: ApiResponse<never> = {
         success: false,
@@ -424,4 +450,74 @@ usersRouter.post("/me/identifiers/claim/verify", requireAuth, otpVerifyLimiter, 
     }
     throw err;
   }
+});
+
+// "k•••@gmail.com" / "+91•••••••210" - enough for the user to recognise
+// where the code went, nothing more.
+function maskDestination(channel: "email" | "phone", value: string): string {
+  if (channel === "email") {
+    const [local, domain] = value.split("@");
+    return `${local.slice(0, 1)}\u2022\u2022\u2022@${domain}`;
+  }
+  return `${value.slice(0, 3)}${"\u2022".repeat(Math.max(value.length - 6, 3))}${value.slice(-3)}`;
+}
+
+// Account deletion, step 1 (optional): sends the confirmation code to the
+// account's own verified email - or verified phone, when SMS can reach it
+// (lib/accountDeletion.ts's deleteCodeChannel). Never to an address the
+// caller supplies. channel null: nothing to send to, and DELETE /me below
+// accepts typing DELETE alone.
+usersRouter.post("/me/delete/send-code", requireAuth, accountDeleteCodeLimiter, async (req, res) => {
+  const target = deleteCodeChannel(req.user!);
+  if (target) {
+    const code = await issueOtp(deleteOtpIdentifier(req.user!.id));
+    sendOtp(target, code, "account-delete");
+  }
+  const body: ApiResponse<AccountDeleteCodeResult> = {
+    success: true,
+    data: {
+      channel: target?.channel ?? null,
+      destination: target ? maskDestination(target.channel, target.value) : null,
+    },
+  };
+  res.json(body);
+});
+
+// Account deletion, step 2 - { confirm: "DELETE", code? }. code is required
+// whenever the account has a channel a code can reach (the server decides,
+// not the client); see lib/accountDeletion.ts for exactly what's deleted
+// and what's kept. Ends the session: the cookie is cleared here, and
+// attachUser refuses a deleted account's token from now on anyway.
+// A suspended user never gets here (requireAuth 403s them) - their
+// deletion goes through an ADMIN (POST /api/admin/users/:id/delete).
+usersRouter.delete("/me", requireAuth, accountDeleteVerifyLimiter, async (req, res) => {
+  if (req.body?.confirm !== "DELETE") {
+    const body: ApiResponse<never> = { success: false, error: 'Type DELETE to confirm' };
+    res.status(400).json(body);
+    return;
+  }
+
+  if (deleteCodeChannel(req.user!)) {
+    const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+    if (!CLAIM_CODE_RE.test(code) || !(await verifyOtp(deleteOtpIdentifier(req.user!.id), code))) {
+      const body: ApiResponse<never> = { success: false, error: "Invalid or expired code" };
+      res.status(401).json(body);
+      return;
+    }
+  }
+
+  try {
+    await deleteUserAccount(req.user!.id);
+  } catch (err) {
+    if (err instanceof AccountAlreadyDeletedError) {
+      const body: ApiResponse<never> = { success: false, error: "This account has already been deleted" };
+      res.status(409).json(body);
+      return;
+    }
+    throw err;
+  }
+
+  res.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
+  const body: ApiResponse<{ deleted: true }> = { success: true, data: { deleted: true } };
+  res.json(body);
 });

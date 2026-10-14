@@ -274,6 +274,7 @@ export function toAdminUserSummary(user: PrismaUser): AdminUserSummary {
     fullName: user.fullName,
     suspendedAt: user.suspendedAt?.toISOString() ?? null,
     suspensionReason: user.suspensionReason,
+    deletedAt: user.deletedAt?.toISOString() ?? null,
     createdAt: user.createdAt.toISOString(),
   };
 }
