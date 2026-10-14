@@ -94,6 +94,13 @@ model User {
   suspendedAt      DateTime?
   suspensionReason String?
 
+  // Set by account deletion (lib/accountDeletion.ts - DELETE /api/users/me
+  // or POST /api/admin/users/:id/delete). The row stays, as an anonymous
+  // record that reports, ratings and transactions still point at, but every
+  // personal field above is cleared; attachUser (middleware/auth.ts) never
+  // signs one in. suspendedAt/suspensionReason are kept for 3 years.
+  deletedAt DateTime?
+
   // Set on every successful POST /api/auth/otp/verify (both signup and
   // login - there's no separate "signup" event). Powers GET
   // /api/admin/metrics' "active users" count (logged in within the last 30
@@ -136,6 +143,23 @@ model User {
   referralMilestoneThreshold Int @default(0)
 
   pointsLedger PointsLedger[]
+
+  deletedIdentifiers DeletedIdentifier[]
+}
+
+// Keyed one-way hashes (lib/identifierHash.ts) of the email and phone of an
+// account that was *suspended* when it was deleted - and only those; no
+// other deleted account keeps anything from its identifiers. A sign-up or
+// identifier claim matching one is refused with that account's suspension
+// message. Purged after 3 years (jobs/purgeDeletedAccountRecords.ts).
+model DeletedIdentifier {
+  id        String   @id @default(cuid())
+  hash      String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 enum PointsLedgerReason {
