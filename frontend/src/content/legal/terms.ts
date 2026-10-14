@@ -26,7 +26,7 @@ export const TERMS_TEXT = `
 
 Last updated: 15 October 2026
 
-These Terms govern your use of GrabMySeats (the website grabmyseats.com and the GrabMySeats mobile app), operated by Brilliant Eight, [REGISTERED ADDRESS], India ("we", "us"). By creating an account or using GrabMySeats you agree to these Terms. If you do not agree, please do not use the service.
+These Terms govern your use of GrabMySeats (the website grabmyseats.com and the GrabMySeats mobile app), operated by Brilliant Eight, 402 Burugupalli Residency, Gachibowli, Hyderabad, Telangana, India 500032, India ("we", "us"). By creating an account or using GrabMySeats you agree to these Terms. If you do not agree, please do not use the service.
 
 ## 1. What GrabMySeats is
 - GrabMySeats is a free marketplace where people who cannot use tickets for movies, events or sports can list them, and nearby people can find them and contact the seller.
@@ -41,7 +41,7 @@ These Terms govern your use of GrabMySeats (the website grabmyseats.com and the 
 ## 3. Listing tickets (sellers)
 - You may list only tickets that you genuinely own and are allowed to transfer.
 - Details you enter (event, venue, date, time, number of seats, price) must be accurate.
-- [PRICE RULE: Tickets must be listed at or below the original face value.]
+- Please price tickets fairly. Listings priced far above the original face value may be removed.
 - You must upload a ticket screenshot that shows its barcode. We read the barcode to check that the same ticket is not listed twice. We keep only a one-way fingerprint of the barcode, not the screenshot image.
 - Do not list a ticket that you have already sold or that has been cancelled. Mark it as sold or withdraw it as soon as it is no longer available.
 - Listings expire automatically after the event's date and time.
@@ -60,7 +60,7 @@ These Terms govern your use of GrabMySeats (the website grabmyseats.com and the 
 - Use GrabMySeats for anything unlawful.
 
 ## 6. Reports, ratings and suspension
-- You can rate users and report listings or users you believe are fraudulent. Reports must be truthful.
+- You can rate users and report other users you believe are fraudulent. Reports must be truthful.
 - We may review reports, remove listings, and suspend or permanently remove accounts that break these Terms or put others at risk, with or without notice.
 
 ## 7. Points and referrals

@@ -26,7 +26,7 @@ export const PRIVACY_TEXT = `
 
 Last updated: 15 October 2026
 
-This policy explains what personal information GrabMySeats (grabmyseats.com and the GrabMySeats app) collects, how we use it, and the choices you have. GrabMySeats is operated by Brilliant Eight, [REGISTERED ADDRESS], India. We handle personal data in line with applicable Indian law, including the Digital Personal Data Protection Act, 2023.
+This policy explains what personal information GrabMySeats (grabmyseats.com and the GrabMySeats app) collects, how we use it, and the choices you have. GrabMySeats is operated by Brilliant Eight, 402 Burugupalli Residency, Gachibowli, Hyderabad, Telangana, India 500032, India. We handle personal data in line with applicable Indian law, including the Digital Personal Data Protection Act, 2023.
 
 ## 1. Information we collect
 - Account details: your email address and/or phone number, and your name.
@@ -34,7 +34,7 @@ This policy explains what personal information GrabMySeats (grabmyseats.com and 
 - Listing details: event, venue, date, time, city, number of seats, price, and your listing description.
 - Ticket barcode: when you upload a ticket screenshot we read its barcode in memory and store only a one-way fingerprint (a hash) so the same ticket cannot be listed twice. We do not keep the screenshot image after it is processed.
 - Activity: listings you view or contact, ratings you give or receive, reports you make, saved searches and ticket alerts, referral and points activity.
-- Reports and evidence: if you report a user or listing and upload proof, we store what you submit.
+- Reports and evidence: if you report another user and upload proof, we store what you submit.
 - Technical data: your IP address, device and browser type, and basic logs we need to keep the service secure and working.
 - Approximate location: the city you choose. If you allow it, your device's location may be used to show nearby listings.
 
@@ -68,7 +68,7 @@ We may also disclose information if the law requires it, to respond to legal req
 
 ## 6. Your choices and rights
 - Access, correct or update your details from your account page.
-- Request deletion of your account and personal data at any time, from the app or by emailing support@grabmyseats.com.
+- Request deletion of your account and personal data at any time, by emailing support@grabmyseats.com.
 - Withdraw consent for optional things, such as location access, in your device settings.
 - Ask us questions or make a complaint about how we handle your data: support@grabmyseats.com. We will respond within a reasonable time. If you are not satisfied, you may approach the Data Protection Board of India once it is operational.
 
