@@ -31,6 +31,18 @@ describe("parseLegalText", () => {
     ]);
   });
 
+  it("reads ### as a third heading level, ending the list or paragraph before it", () => {
+    expect(parseLegalText("## Section\n### Question?\nAnswer.\n- a\n### Next?\nMore.")).toEqual([
+      { kind: "h2", text: "Section" },
+      { kind: "h3", text: "Question?" },
+      { kind: "p", text: "Answer." },
+      { kind: "ul", items: ["a"] },
+      { kind: "h3", text: "Next?" },
+      { kind: "p", text: "More." },
+    ]);
+    expect(parseLegalText("#### Too deep")).toEqual([{ kind: "p", text: "#### Too deep" }]);
+  });
+
   it("leaves HTML and links as plain text", () => {
     expect(parseLegalText("<b>bold</b> [link](https://example.com)")).toEqual([
       { kind: "p", text: "<b>bold</b> [link](https://example.com)" },

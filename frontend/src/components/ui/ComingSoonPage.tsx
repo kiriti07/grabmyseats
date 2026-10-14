@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-// Shared shell for pages without real content yet: /help, and /terms and
-// /privacy until their text is pasted in (src/content/legal/). The copy is
+// Shared shell for pages without real content yet: /terms and /privacy
+// until their text is pasted in (src/content/legal/). The copy is
 // deliberately explicit that this is a
 // placeholder, not just an empty page, so nobody mistakes "Coming soon"
 // for finished legal/support content.
