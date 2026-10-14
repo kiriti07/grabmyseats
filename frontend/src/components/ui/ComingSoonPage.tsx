@@ -1,7 +1,8 @@
 import Link from "next/link";
 
-// Shared shell for /terms, /privacy, and /help - none of these have real
-// content yet. The copy is deliberately explicit that this is a
+// Shared shell for pages without real content yet: /help, and /terms and
+// /privacy until their text is pasted in (src/content/legal/). The copy is
+// deliberately explicit that this is a
 // placeholder, not just an empty page, so nobody mistakes "Coming soon"
 // for finished legal/support content.
 export function ComingSoonPage({ title, message }: { title: string; message: string }) {
