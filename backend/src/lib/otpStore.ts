@@ -25,12 +25,12 @@ export async function issueOtp(identifier: string): Promise<string> {
 }
 
 export async function verifyOtp(identifier: string, code: string): Promise<boolean> {
-  const key = otpKey(identifier);
-  const stored = await redis.get(key);
+  // Read and delete in one atomic step: every attempt consumes the code, so
+  // it can't be reused or brute-forced, and of several concurrent verifies
+  // only one ever sees it (a separate GET then DEL let them all succeed).
+  // GETDEL needs Redis 6.2+.
+  const stored = await redis.getdel(otpKey(identifier));
   if (stored === null) return false;
-
-  // Always consume the attempt so a code can't be reused or brute-forced.
-  await redis.del(key);
 
   return stored === code;
 }
