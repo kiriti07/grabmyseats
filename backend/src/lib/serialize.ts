@@ -206,16 +206,19 @@ export function toSharedTransaction(txn: PrismaTransaction): SharedTransaction {
   };
 }
 
-export function toSharedTicketAlert(alert: PrismaTicketAlert): SharedTicketAlert {
+export function toSharedTicketAlert(alert: PrismaTicketAlert, now: Date = new Date()): SharedTicketAlert {
   return {
     id: alert.id,
     titleQuery: alert.titleQuery,
+    category: alert.category,
+    seatsWanted: alert.seatsWanted,
+    dates: (alert.dates ?? []).map((d) => d.toISOString().slice(0, 10)).sort(),
     cityId: alert.cityId,
     lat: alert.lat,
     lng: alert.lng,
     radiusKm: alert.radiusKm,
-    category: alert.category,
     isActive: alert.isActive,
+    status: alert.expiresAt <= now ? "expired" : alert.isActive ? "active" : "paused",
     createdAt: alert.createdAt.toISOString(),
     expiresAt: alert.expiresAt.toISOString(),
   };

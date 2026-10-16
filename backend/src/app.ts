@@ -14,6 +14,7 @@ import { adminAuthRouter } from "./routes/adminAuth";
 import { adminStaffRouter } from "./routes/adminStaff";
 import { usersRouter } from "./routes/users";
 import { alertsRouter } from "./routes/alerts";
+import { pushTokensRouter } from "./routes/pushTokens";
 import { fraudReportsRouter } from "./routes/fraudReports";
 import { devRouter } from "./routes/dev";
 
@@ -72,6 +73,7 @@ app.use("/api/admin", adminStaffRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/alerts", alertsRouter);
+app.use("/api/push", pushTokensRouter);
 app.use("/api/fraud-reports", fraudReportsRouter);
 
 // DEV-ONLY. Must NEVER be mounted in production - see routes/dev.ts for

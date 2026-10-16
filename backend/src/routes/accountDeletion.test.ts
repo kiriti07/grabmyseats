@@ -254,6 +254,13 @@ describe("account deletion", () => {
       venueIds.push(venue.id);
       await prisma.venuePinVote.create({ data: { venueId: venue.id, userId: me.id, lat: 17.44, lng: 78.35 } });
       await prisma.pointsLedger.create({ data: { userId: me.id, amount: 200, reason: "REFERRAL_MILESTONE" } });
+      await prisma.pushToken.create({ data: { userId: me.id, token: `fake-token-${randomUUID()}`, platform: "android" } });
+      await prisma.pushToken.create({ data: { userId: me.id, token: `fake-token-${randomUUID()}`, platform: "android" } });
+      const delivery = await prisma.pushDelivery.create({ data: { userId: me.id, status: "SENT", matchCount: 1 } });
+      await prisma.alertNotification.update({
+        where: { alertId_listingId: { alertId: alert.id, listingId: theirs.id } },
+        data: { deliveryId: delivery.id },
+      });
       const filed = await prisma.fraudReport.create({
         data: { reporterId: me.id, reportedUserId: other.id, description: "filed by me", evidenceUrls: [] },
       });
@@ -338,6 +345,11 @@ describe("account deletion", () => {
 
     it("keeps reports filed by and against the account", async () => {
       expect(await prisma.fraudReport.count({ where: { id: { in: [ids.filed, ids.against] } } })).toBe(2);
+    });
+
+    it("deletes push devices and push history", async () => {
+      expect(await prisma.pushToken.count({ where: { userId: me.id } })).toBe(0);
+      expect(await prisma.pushDelivery.count({ where: { userId: me.id } })).toBe(0);
     });
 
     it("keeps nothing from the identifiers of an account that wasn't suspended", async () => {

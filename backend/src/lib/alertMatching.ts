@@ -41,7 +41,10 @@ interface CandidateRow extends AlertMatch {
 }
 
 export async function findAlertMatches(
-  filter: { alertIds?: string[]; listingIds?: string[]; userIds?: string[] } = {},
+  // includeInactive: also the given alerts while paused - routes/alerts.ts
+  // saves an alert switched off, finds what already matches, records it as
+  // shown, and only then switches it on, so the job can't push those.
+  filter: { alertIds?: string[]; listingIds?: string[]; userIds?: string[]; includeInactive?: boolean } = {},
   now: Date = new Date(),
 ): Promise<AlertMatch[]> {
   const alertFilter = filter.alertIds
@@ -63,7 +66,7 @@ export async function findAlertMatches(
     JOIN "User" buyer ON buyer.id = ta."userId"
     JOIN "Listing" l ON l.category = ta.category
     JOIN "User" seller ON seller.id = l."sellerId"
-    WHERE ta."isActive" = true
+    WHERE ${filter.includeInactive && filter.alertIds ? Prisma.sql`true` : Prisma.sql`ta."isActive" = true`}
       AND ta."expiresAt" > ${now}
       AND buyer."suspendedAt" IS NULL AND buyer."deletedAt" IS NULL
       AND l.status IN ('ACTIVE', 'PARTIALLY_SOLD')

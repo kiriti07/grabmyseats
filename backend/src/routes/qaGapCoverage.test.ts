@@ -19,6 +19,7 @@ import { listingsRouter } from "./listings";
 import { transactionsRouter } from "./transactions";
 import { usersRouter } from "./users";
 import { alertsRouter } from "./alerts";
+import { pushTokensRouter } from "./pushTokens";
 import { fraudReportsRouter } from "./fraudReports";
 import { adminRouter } from "./admin";
 import { adminAuthRouter } from "./adminAuth";
@@ -226,6 +227,7 @@ describe("QA gap coverage", () => {
       ["/api/transactions", transactionsRouter],
       ["/api/users", usersRouter],
       ["/api/alerts", alertsRouter],
+      ["/api/push", pushTokensRouter],
       ["/api/fraud-reports", fraudReportsRouter],
       ["/api/admin/auth", adminAuthRouter],
       ["/api/admin", adminStaffRouter],

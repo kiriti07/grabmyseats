@@ -20,8 +20,8 @@ import { isPhoneCountryAllowed, type IdentifierChannel } from "./validators";
 // - open reservations, either side: EXPIRED, seats given back;
 // - the user's live listings (ACTIVE / PARTIALLY_SOLD): WITHDRAWN;
 //   past ones stay, with their one-way ticket fingerprint;
-// - alerts (+ their notifications), listing views and contacts, venue pin
-//   votes and points: deleted;
+// - alerts (+ their notifications), push devices and push history,
+//   listing views and contacts, venue pin votes and points: deleted;
 // - ratings they gave: stars kept (sellers' averages stay honest), comment
 //   text deleted; ratings they received: kept, but the public summary of a
 //   deleted account is empty (routes/users.ts);
@@ -120,6 +120,10 @@ export async function deleteUserAccount(userId: string): Promise<void> {
 
     await tx.alertNotification.deleteMany({ where: { alert: { userId } } });
     await tx.ticketAlert.deleteMany({ where: { userId } });
+    // This account's devices stop receiving notifications; its push history
+    // (no tokens or text in it) goes too.
+    await tx.pushDelivery.deleteMany({ where: { userId } });
+    await tx.pushToken.deleteMany({ where: { userId } });
     await tx.listingView.deleteMany({ where: { userId } });
     await tx.listingContact.deleteMany({ where: { userId } });
     await tx.venuePinVote.deleteMany({ where: { userId } });
