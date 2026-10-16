@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { ReferralSummary } from "@grabmyseats/shared";
 import { useAuth } from "@/context/AuthContext";
-import { fetchMyReferrals } from "@/lib/api";
+import { fetchMyReferrals, fetchUnseenAlertCount } from "@/lib/api";
 import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
 import { VerifyIdentityBanner } from "@/components/account/VerifyIdentityBanner";
 
@@ -19,6 +19,8 @@ export default function AccountPage() {
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [referralCopyNotice, setReferralCopyNotice] = useState<string | null>(null);
   const [referrals, setReferrals] = useState<ReferralSummary | null>(null);
+  // Alert matches not yet seen in My Alerts - the dot on that link.
+  const [unseenMatches, setUnseenMatches] = useState(0);
   // window.location.origin is only known once mounted in the browser -
   // computed here (not inline at render) so server-rendered and first-
   // client-render markup match, same reasoning as handleShare below only
@@ -40,6 +42,9 @@ export default function AccountPage() {
     fetchMyReferrals()
       .then(setReferrals)
       .catch(() => setReferrals(null));
+    fetchUnseenAlertCount()
+      .then(({ count }) => setUnseenMatches(count))
+      .catch(() => setUnseenMatches(0));
   }, [isAuthenticated]);
 
   // /signup?ref=<code> (see backend's POST /api/auth/otp/verify, which only
@@ -148,9 +153,15 @@ export default function AccountPage() {
           </Link>
           <Link
             href="/account/alerts"
-            className="rounded-lg border border-line px-4 py-2.5 text-sm font-medium text-foreground hover:border-gold"
+            className="relative rounded-lg border border-line px-4 py-2.5 text-sm font-medium text-foreground hover:border-gold"
           >
             My Alerts
+            {unseenMatches > 0 && (
+              <span
+                className="absolute right-3 top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-gold"
+                aria-label={`${unseenMatches} new match${unseenMatches === 1 ? "" : "es"}`}
+              />
+            )}
           </Link>
           <button
             onClick={handleShare}

@@ -7,7 +7,6 @@ import type {
   Category,
   CompleteProfileInput,
   CreateRatingInput,
-  CreateTicketAlertInput,
   DeliveryMethod,
   FraudReport,
   GeocodePreview,
@@ -28,6 +27,9 @@ import type {
   TransactionDetail,
   TransactionEmailForward,
   TicketAlert,
+  TicketAlertInput,
+  TicketAlertSaveResult,
+  TicketAlertWithMatches,
   UpdateListingInput,
   UpdateProfileInput,
   User,
@@ -452,20 +454,40 @@ export function geocodeVenue(theaterName: string, city: string): Promise<Geocode
 
 // "Notify me" saved search - see jobs/matchAlerts.ts (backend) for what
 // actually fires it.
-export function createAlert(data: CreateTicketAlertInput): Promise<{ alert: TicketAlert }> {
-  return request("/api/alerts", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+// Ticket alerts - see backend routes/alerts.ts. Saving returns the listings
+// that already match (shown on screen, never pushed).
+export function createAlert(data: TicketAlertInput): Promise<TicketAlertSaveResult> {
+  return request("/api/alerts", { method: "POST", body: JSON.stringify(data) });
 }
 
-export function fetchMyAlerts(): Promise<{ alerts: TicketAlert[] }> {
+export function updateAlert(id: string, data: TicketAlertInput): Promise<TicketAlertSaveResult> {
+  return request(`/api/alerts/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export function fetchMyAlerts(): Promise<{ alerts: TicketAlertWithMatches[] }> {
   return request("/api/alerts/mine");
 }
 
-// Soft-cancels (isActive: false) - see DELETE /api/alerts/:id.
-export function cancelAlert(id: string): Promise<{ alert: TicketAlert }> {
+export function pauseAlert(id: string): Promise<{ alert: TicketAlert }> {
+  return request(`/api/alerts/${id}/pause`, { method: "POST" });
+}
+
+export function resumeAlert(id: string): Promise<{ alert: TicketAlert }> {
+  return request(`/api/alerts/${id}/resume`, { method: "POST" });
+}
+
+// A real delete - the alert and its match history go.
+export function deleteAlert(id: string): Promise<{ deleted: true }> {
   return request(`/api/alerts/${id}`, { method: "DELETE" });
+}
+
+// For the dot on Account -> My Alerts.
+export function fetchUnseenAlertCount(): Promise<{ count: number }> {
+  return request("/api/alerts/unseen-count");
+}
+
+export function markAlertsSeen(): Promise<{ ok: true }> {
+  return request("/api/alerts/seen", { method: "POST" });
 }
 
 // Reports another user for suspected fraud. With relatedTransactionId (what

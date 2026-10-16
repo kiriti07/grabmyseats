@@ -114,13 +114,3 @@ export function alertExpiresAt(dates: string[]): Date {
   return new Date(new Date(`${last}T23:59:59.999Z`).getTime() - SHOWTIME_UTC_OFFSET_MINUTES * 60_000);
 }
 
-// Temporary: the old "Notify me" request shape, still used by the frontend
-// until its alert screens move to TicketAlertInput (next commit).
-export interface CreateTicketAlertInput {
-  titleQuery: string;
-  cityId?: string;
-  lat: number;
-  lng: number;
-  radiusKm?: number;
-  category?: Category;
-}
