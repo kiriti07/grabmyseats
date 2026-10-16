@@ -490,6 +490,15 @@ export function markAlertsSeen(): Promise<{ ok: true }> {
   return request("/api/alerts/seen", { method: "POST" });
 }
 
+// This device's push token (Android app only - see lib/push.ts).
+export function registerPushToken(token: string): Promise<{ registered: true }> {
+  return request("/api/push/tokens", { method: "POST", body: JSON.stringify({ token, platform: "android" }) });
+}
+
+export function removePushToken(token: string): Promise<{ removed: true }> {
+  return request("/api/push/tokens", { method: "DELETE", body: JSON.stringify({ token }) });
+}
+
 // Reports another user for suspected fraud. With relatedTransactionId (what
 // the contact-reveal and transaction-detail "Report user" entry points
 // send), the backend works out who's being reported - the other party on

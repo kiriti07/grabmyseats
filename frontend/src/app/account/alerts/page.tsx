@@ -18,6 +18,7 @@ import { ApiError, deleteAlert, fetchMyAlerts, markAlertsSeen, pauseAlert, resum
 import { ErrorText } from "@/components/ui/ErrorText";
 import { AlertForm } from "@/components/alerts/AlertForm";
 import { AlertMatchList } from "@/components/alerts/AlertMatchList";
+import { NotificationPrompt } from "@/components/push/NotificationPrompt";
 
 const STATUS_LABEL: Record<TicketAlertStatus, string> = { active: "Active", paused: "Paused", expired: "Ended" };
 const STATUS_CLASS: Record<TicketAlertStatus, string> = {
@@ -47,6 +48,8 @@ export default function AlertsPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState<TicketAlertSaveResult | null>(null);
+  // Only a newly created alert asks about notifications - not an edit.
+  const [justCreated, setJustCreated] = useState(false);
   // Matches that were unseen when this page was opened stay "New" for the
   // whole visit, even after they're marked seen and the list reloads.
   const [newThisVisit, setNewThisVisit] = useState<Set<string>>(new Set());
@@ -86,6 +89,7 @@ export default function AlertsPage() {
   }
 
   async function handleSaved(result: TicketAlertSaveResult) {
+    setJustCreated(isCreating);
     setJustSaved(result);
     setIsCreating(false);
     setEditingId(null);
@@ -112,6 +116,7 @@ export default function AlertsPage() {
         {justSaved && (
           <div className="mb-4 rounded-lg border border-line bg-surface p-4">
             <p className="text-sm text-success">Alert saved ✓</p>
+            {justCreated && <NotificationPrompt />}
             {justSaved.currentMatches.length > 0 && (
               <div className="mt-3">
                 <p className="mb-2 text-xs font-medium text-foreground">Already available</p>

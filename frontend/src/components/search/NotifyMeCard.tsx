@@ -6,6 +6,7 @@ import type { Category, TicketAlertSaveResult } from "@grabmyseats/shared";
 import type { CategoryFilter } from "./CategoryTabs";
 import { AlertForm } from "@/components/alerts/AlertForm";
 import { AlertMatchList } from "@/components/alerts/AlertMatchList";
+import { NotificationPrompt } from "@/components/push/NotificationPrompt";
 
 // Shown when a search comes up empty - lets the buyer save it as a ticket
 // alert instead of walking away. Pre-filled from the search, every field
@@ -31,6 +32,7 @@ export function NotifyMeCard({
       <div className="mt-6 w-full max-w-sm rounded-lg border border-line bg-surface p-4 text-left">
         <p className="text-sm text-success">Alert saved ✓</p>
         <p className="mt-1 text-xs text-muted">New matches will show in My Alerts.</p>
+        <NotificationPrompt />
         {saved.currentMatches.length > 0 && (
           <div className="mt-3">
             <p className="mb-2 text-xs font-medium text-foreground">Already available</p>

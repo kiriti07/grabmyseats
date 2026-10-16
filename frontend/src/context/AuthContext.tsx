@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import type { User } from "@grabmyseats/shared";
 import { fetchMe } from "@/lib/api";
 import { clearToken, getToken, setToken } from "@/lib/token";
+import { stopPush } from "@/lib/push";
 
 interface AuthContextValue {
   user: User | null;
@@ -56,10 +57,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(user);
   }, []);
 
+  // Removes this device's push token first (it needs the session) - at most
+  // 1.5s, so signing out never hangs on the network.
   const logout = useCallback(() => {
-    clearToken();
-    setUser(null);
-    router.push("/login");
+    const done = () => {
+      clearToken();
+      setUser(null);
+      router.push("/login");
+    };
+    Promise.race([stopPush(), new Promise((resolve) => setTimeout(resolve, 1500))])
+      .catch(() => {})
+      .finally(done);
   }, [router]);
 
   return (

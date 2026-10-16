@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bebas_Neue, Inter } from "next/font/google";
 import { AuthProvider } from "@/context/AuthContext";
+import { PushBootstrap } from "@/components/push/PushBootstrap";
 import "./globals.css";
 
 // Bebas Neue: a tall, condensed display face styled after mid-century
@@ -30,7 +31,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${bebasNeue.variable} ${inter.variable} font-sans antialiased`}>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <PushBootstrap />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

@@ -42,9 +42,14 @@ export default function AccountPage() {
     fetchMyReferrals()
       .then(setReferrals)
       .catch(() => setReferrals(null));
-    fetchUnseenAlertCount()
-      .then(({ count }) => setUnseenMatches(count))
-      .catch(() => setUnseenMatches(0));
+    const refreshUnseen = () =>
+      fetchUnseenAlertCount()
+        .then(({ count }) => setUnseenMatches(count))
+        .catch(() => setUnseenMatches(0));
+    refreshUnseen();
+    // A push arriving while the app is open (components/push/PushBootstrap).
+    window.addEventListener("gms:alert-match", refreshUnseen);
+    return () => window.removeEventListener("gms:alert-match", refreshUnseen);
   }, [isAuthenticated]);
 
   // /signup?ref=<code> (see backend's POST /api/auth/otp/verify, which only
