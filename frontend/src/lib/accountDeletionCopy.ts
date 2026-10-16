@@ -10,6 +10,7 @@ export const DELETION_DELETED = [
   "Your listings that are still live - they're withdrawn and no longer shown.",
   "Any seats you're holding, and any holds on your tickets - they're released.",
   "Your ticket alerts, your record of listings you viewed or contacted, and your points.",
+  "Your notification tokens, so your devices stop receiving GrabMySeats notifications.",
   "The written comments in ratings you gave.",
   "Your referral link.",
 ];

@@ -36,6 +36,7 @@ This policy explains what personal information GrabMySeats (grabmyseats.com and 
 - Activity: listings you view or contact, ratings you give or receive, reports you make, saved searches and ticket alerts, referral and points activity.
 - Reports and evidence: if you report another user and upload proof, we store what you submit.
 - Technical data: your IP address, device and browser type, and basic logs we need to keep the service secure and working.
+- Notification token: if you allow notifications in the GrabMySeats Android app, a token that identifies the app on your device. It is issued by Google, and we use it only to send you notifications you have asked for, such as ticket alerts.
 - Approximate location: the city you choose. If you allow it, your device's location may be used to show nearby listings.
 
 ## 2. How we use it
@@ -43,6 +44,7 @@ This policy explains what personal information GrabMySeats (grabmyseats.com and 
 - To show listings near you, and to let buyers and sellers contact each other.
 - To check tickets are not listed twice, and to prevent fraud, scams and abuse.
 - To run ratings, reports, referrals, points and notifications you ask for.
+- To send push notifications you have asked for, such as ticket alerts, to the app on your device.
 - To send you service messages, such as sign-in codes and alerts you set up.
 - To fix problems, improve the service, and meet our legal obligations.
 
@@ -57,6 +59,7 @@ We do not sell your personal data and we do not show third-party advertising. We
 - Image storage: Cloudinary (profile photos and report evidence).
 - Ticket reading: Google Cloud Vision (to read text from ticket screenshots).
 - Email: our email provider, to deliver sign-in codes.
+- Push notifications: Google Firebase Cloud Messaging, to deliver notifications to the app on your device. Notifications include only the event, date and number of seats, never your personal details or anyone else's.
 - Sign-in by phone, when we turn it on: an SMS provider, to deliver codes.
 We may also disclose information if the law requires it, to respond to legal requests, or to protect users and our service from fraud or harm.
 
@@ -67,11 +70,12 @@ We may also disclose information if the law requires it, to respond to legal req
 - We keep reports and suspension records about a deleted account, and the following for accounts that were suspended when deleted, for 3 years, to prevent fraud and to stop suspended users from returning: a one-way hash (an irreversible code) of the email address and phone number, which we cannot turn back into the original details. After 3 years these records are deleted.
 - Reports you made about other users stay with those users' records, because they are part of those users' safety history.
 - Technical logs are kept for a limited time.
+- Notification tokens are deleted when you sign out of the app, when you delete your account, or when Google tells us a token is no longer valid.
 
 ## 6. Your choices and rights
 - Access, correct or update your details from your account page.
 - Request deletion of your account and personal data at any time, by emailing support@grabmyseats.com.
-- Withdraw consent for optional things, such as location access, in your device settings.
+- Withdraw consent for optional things, such as location access or notifications, in your device settings.
 - Ask us questions or make a complaint about how we handle your data: support@grabmyseats.com. We will respond within a reasonable time. If you are not satisfied, you may approach the Data Protection Board of India once it is operational.
 
 ## 7. Security
@@ -81,7 +85,7 @@ We may also disclose information if the law requires it, to respond to legal req
 - GrabMySeats is for people aged 18 and over. We do not knowingly collect data from children. If you believe a child has used the service, contact us and we will delete the account.
 
 ## 9. On your device
-- We store a sign-in token and basic settings on your device so you stay signed in. We do not use this for advertising.
+- We store a sign-in token, basic settings and, if you allow notifications, a notification token on your device. We do not use this for advertising.
 
 ## 10. Changes to this policy
 - We may update this policy. When we do, we will change the date above, and for important changes we will tell you in the app.
