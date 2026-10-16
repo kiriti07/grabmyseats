@@ -7,8 +7,9 @@ export interface TicketAlert {
   id: string;
   titleQuery: string;
   cityId: string | null;
-  lat: number;
-  lng: number;
+  // null when the alert isn't limited to a radius (city-only or anywhere).
+  lat: number | null;
+  lng: number | null;
   radiusKm: number;
   category: Category;
   isActive: boolean;

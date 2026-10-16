@@ -145,6 +145,9 @@ model User {
   pointsLedger PointsLedger[]
 
   deletedIdentifiers DeletedIdentifier[]
+
+  pushTokens     PushToken[]
+  pushDeliveries PushDelivery[]
 }
 
 // Keyed one-way hashes (lib/identifierHash.ts) of the email and phone of an
@@ -465,14 +468,24 @@ model TicketAlert {
   // rather than precise geolocation - display-only (e.g. "near Bengaluru"
   // on /account/alerts); matching itself always uses lat/lng.
   cityId     String?
-  lat        Float
-  lng        Float
+  // Optional since alert dates/seats (lib/alertMatching.ts): lat/lng set ->
+  // within radiusKm of them; only cityId -> the listing's own city; neither
+  // -> anywhere. Alerts created before this all have lat/lng.
+  lat        Float?
+  lng        Float?
   // Kept in sync with lat/lng by a DB trigger (see migration), same
   // pattern as Listing.theaterLocation - powers matchAlerts.ts's
   // ST_DWithin check.
   location Unsupported("geography(Point, 4326)")?
   radiusKm Float    @default(7)
   category Category @default(MOVIE)
+  // How many tickets the buyer wants: only listings with at least this many
+  // free seats match.
+  seatsWanted Int @default(1)
+  // The show dates the buyer wants (India calendar days). Empty only on
+  // alerts created before this column existed, which match any date.
+  dates DateTime[] @db.Date
+  // false = paused by the user (deleting an alert really deletes it).
   isActive Boolean  @default(true)
   createdAt DateTime @default(now())
   // Default window is 14 days from creation (see POST /api/alerts) -
@@ -489,14 +502,87 @@ model TicketAlert {
 // matchAlerts.ts never SMSes the same user twice for the same match even
 // if it re-scans a listing across multiple runs.
 model AlertNotification {
-  id         String      @id @default(cuid())
+  id         String                  @id @default(cuid())
   alertId    String
-  alert      TicketAlert @relation(fields: [alertId], references: [id])
+  alert      TicketAlert             @relation(fields: [alertId], references: [id])
   listingId  String
-  listing    Listing     @relation(fields: [listingId], references: [id])
-  notifiedAt DateTime    @default(now())
+  listing    Listing                 @relation(fields: [listingId], references: [id])
+  notifiedAt DateTime                @default(now())
+  // What became of this match - see AlertNotificationStatus. The row
+  // itself, unique per (alert, listing), is the "never twice" record.
+  status     AlertNotificationStatus @default(PENDING)
+  // The push it went out in (several matches share one).
+  deliveryId String?
+  delivery   PushDelivery?           @relation(fields: [deliveryId], references: [id])
+  // When the user saw it in My Alerts (drives the dot on Account).
+  seenAt     DateTime?
 
   @@unique([alertId, listingId])
+  @@index([status, notifiedAt])
+}
+
+// jobs/matchAlerts.ts:
+// - PENDING: matched, waiting for a push (or for the hourly cap).
+// - SENT: a push reached at least one of the user's devices.
+// - SENT_UNCONFIRMED: a push was attempted but its outcome is unknown
+//   (timeout/crash) - never retried, so never sent twice.
+// - IN_APP_ONLY: no device, or push disabled - shown in My Alerts only.
+// - SHOWN_ON_CREATE: already live when the alert was created or edited -
+//   shown on screen then, never pushed.
+// - SKIPPED: no longer matched by send time (sold, withdrawn, user gone).
+// - FAILED: push failed on every device after the retry limit.
+enum AlertNotificationStatus {
+  PENDING
+  SENT
+  SENT_UNCONFIRMED
+  IN_APP_ONLY
+  SHOWN_ON_CREATE
+  SKIPPED
+  FAILED
+}
+
+// A device that can receive push notifications (Firebase Cloud Messaging),
+// registered by the Android app once notification permission is granted
+// (POST /api/push/tokens) and removed on sign-out, on account deletion, or
+// when FCM reports it invalid. token is unique: a device that signs into
+// another account moves to that account.
+model PushToken {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  token      String   @unique
+  platform   String
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum PushDeliveryStatus {
+  SENDING
+  SENT
+  SENT_UNCONFIRMED
+  RETRY
+  FAILED
+}
+
+// One push notification to one user, covering one or more matches
+// (AlertNotification.deliveryId). Holds no token and no message text.
+// createdAt drives the per-user hourly cap.
+model PushDelivery {
+  id         String             @id @default(cuid())
+  userId     String
+  user       User               @relation(fields: [userId], references: [id])
+  status     PushDeliveryStatus @default(SENDING)
+  attempts   Int                @default(0)
+  matchCount Int
+  createdAt  DateTime           @default(now())
+  sentAt     DateTime?
+
+  notifications AlertNotification[]
+
+  @@index([userId, createdAt])
+  @@index([status])
 }
 
 enum FraudReportStatus {
