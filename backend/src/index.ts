@@ -8,6 +8,7 @@ import { requirePhoneVerification } from "./lib/config";
 import { checkReviewLoginConfigAtStartup } from "./lib/reviewAccess";
 import { isTicketFingerprintConfigured } from "./lib/ticketFingerprint";
 import { isIdentifierHashConfigured } from "./lib/identifierHash";
+import { checkPushConfigAtStartup } from "./lib/push";
 
 // Fails loud instead of silently ignoring a leftover dev-only env var that
 // would otherwise let anyone sign in as any email address in production.
@@ -61,6 +62,11 @@ if (process.env.NODE_ENV === "production" && !isTicketFingerprintConfigured()) {
 if (process.env.NODE_ENV === "production" && !isIdentifierHashConfigured()) {
   throw new Error("IDENTIFIER_HASH_SECRET must be set (32+ characters) when NODE_ENV=production");
 }
+
+// Ticket-alert push notifications (lib/push): off unless
+// PUSH_NOTIFICATIONS_ENABLED=true; in production, switched on without a
+// valid service-account key stops startup. Only enabled/disabled is logged.
+console.log(`[config] PUSH=${checkPushConfigAtStartup()}`);
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 
