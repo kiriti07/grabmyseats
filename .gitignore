@@ -37,3 +37,10 @@ yarn-error.log*
 
 # vercel
 .vercel
+
+# Firebase / Google service-account keys must never be committed (the
+# backend reads the push key from FIREBASE_SERVICE_ACCOUNT_BASE64 or
+# FIREBASE_SERVICE_ACCOUNT_FILE on the server).
+*firebase-adminsdk*.json
+*service-account*.json
+fcm-sender*.json

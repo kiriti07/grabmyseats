@@ -7,8 +7,8 @@ android {
         applicationId "com.grabmyseats.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -51,4 +51,15 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// A release build without google-services.json would quietly ship an app
+// that never receives push notifications - fail it instead. Debug builds
+// still work without it (push just stays off). The file is not committed:
+// copy it from the Firebase console into android/app/ before releasing.
+gradle.taskGraph.whenReady { graph ->
+    def releasing = graph.allTasks.any { it.project == project && it.name.toLowerCase().contains("release") }
+    if (releasing && !file('google-services.json').exists()) {
+        throw new GradleException("android/app/google-services.json is missing - download it from the Firebase console before building a release.")
+    }
 }
