@@ -1,97 +1,318 @@
-import { prisma } from "../lib/prisma";
+import { cityNameForId, showtimeClockNow } from "@grabmyseats/shared";
 import { Prisma } from "../generated/prisma/client";
-import { smsProvider } from "../lib/sms";
-import { TITLE_SIMILARITY_THRESHOLD } from "../lib/searchMatch";
+import { prisma } from "../lib/prisma";
+import { findAlertMatches } from "../lib/alertMatching";
+import { getPushSender, type PushMessage, type PushSender } from "../lib/push";
 
-// In-memory cursor rather than a DB-persisted lastCheckedForAlertsAt
-// column - reset to "now" on every process start, so a restart only means
-// the next run re-scans at most one job interval's worth of listings.
-// That overlap is harmless: AlertNotification's (alertId, listingId)
-// unique constraint is the actual "never notify twice" guarantee (see the
-// NOT EXISTS check below, which just avoids querying rows that would fail
-// it), not this cursor - this only exists to keep each run's scan cheap
-// (recently-created listings only, not every live one).
-let lastCheckedAt = new Date();
+// Ticket-alert notifications, every 5 minutes (jobs/index.ts) - never inside
+// the request that publishes a listing.
+//
+// 1. Match: every live listing against every usable alert
+//    (lib/alertMatching.ts). Each new (alert, listing) pair gets one
+//    AlertNotification row, PENDING. The row is unique per pair, so a pair
+//    is notified at most once, ever: a listing that's edited later, or
+//    gains seats, only notifies an alert it never matched before. Checking
+//    every live listing (rather than only new ones) is what catches edits
+//    and seats coming back from expired reservations.
+// 2. Send, per user: pending matches still valid are combined into one push
+//    (PushDelivery) to all the user's devices. At most PUSHES_PER_USER_PER_HOUR
+//    pushes an hour - later matches wait and go out combined. No device, or
+//    push switched off: IN_APP_ONLY (My Alerts shows them either way).
+//
+// Never twice: the delivery is marked SENDING before the call; at least one
+// device accepting it makes it SENT; only an explicit temporary failure on
+// every device is retried (RETRY, same delivery, up to MAX_ATTEMPTS); no
+// answer at all (or a crash mid-send, found later as a stale SENDING) is
+// SENT_UNCONFIRMED and never retried.
 
-interface AlertMatchRow {
-  alertId: string;
-  phone: string;
+export const PUSHES_PER_USER_PER_HOUR = 3;
+export const MAX_ATTEMPTS = 3;
+const STALE_SENDING_MS = 10 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const NAME_MAX = 40;
+
+export interface MatchAlertsResult {
+  matched: number;
+  pushed: number;
+  inAppOnly: number;
+  skipped: number;
 }
 
-// Scans Listings created since the last run against active, non-expired
-// TicketAlerts: fuzzy title match (same pg_trgm similarity() + threshold
-// GET /api/listings/search uses - see lib/searchMatch.ts), same category,
-// and within the alert's own radiusKm of the listing. Each surviving match
-// gets exactly one SMS via the existing SmsProvider interface, ever.
-export async function matchAlerts(): Promise<number> {
-  const checkFrom = lastCheckedAt;
-  const runStartedAt = new Date();
-  // Advanced before processing, not after - so a mid-run failure can never
-  // cause the same listings to be rescanned forever. A listing dropped by
-  // a failed run just doesn't get a retry for its alerts - the same
-  // never-double-act-but-may-miss-under-failure trade-off
-  // jobs/expireReservations.ts and friends make elsewhere in this app.
-  lastCheckedAt = runStartedAt;
+interface PendingRow {
+  id: string;
+  userId: string;
+  listingId: string;
+  movieName: string;
+  showtime: Date;
+  freeSeats: number;
+  alertCityId: string | null;
+  alertHasPoint: boolean;
+}
 
-  const newListings = await prisma.listing.findMany({
-    where: {
-      createdAt: { gt: checkFrom, lte: runStartedAt },
-      status: { in: ["ACTIVE", "PARTIALLY_SOLD"] },
-      // The Play review account's test listings are never shown to anyone
-      // else (see GET /api/listings/search), so never alerted on either.
-      seller: { isReviewAccount: false },
-    },
-    select: { id: true, movieName: true, category: true, theaterLat: true, theaterLng: true },
-  });
+// Optional scoping by user, so tests sharing one database only ever touch
+// their own rows - the scheduled run always does everyone.
+export async function matchAlerts(
+  options: { now?: Date; userIds?: string[]; sender?: PushSender | null } = {},
+): Promise<MatchAlertsResult> {
+  const now = options.now ?? new Date();
+  const sender = options.sender !== undefined ? options.sender : getPushSender();
+  const result: MatchAlertsResult = { matched: 0, pushed: 0, inAppOnly: 0, skipped: 0 };
 
-  let notifiedCount = 0;
-
-  for (const listing of newListings) {
-    const origin = Prisma.sql`ST_SetSRID(ST_MakePoint(${listing.theaterLng}, ${listing.theaterLat}), 4326)::geography`;
-
-    const matches = await prisma.$queryRaw<AlertMatchRow[]>`
-      SELECT ta.id AS "alertId", u.phone AS phone
-      FROM "TicketAlert" ta
-      JOIN "User" u ON u.id = ta."userId"
-      WHERE ta."isActive" = true
-        AND ta."expiresAt" > now()
-        -- Only to a phone the user has proven they own by SMS code: an
-        -- unverified phone is self-reported, and texting it would let
-        -- anyone point alert SMS from us at someone else's number.
-        AND u.phone IS NOT NULL
-        AND u."phoneVerifiedAt" IS NOT NULL
-        AND ta.category = ${listing.category}::"Category"
-        AND similarity(ta."titleQuery", ${listing.movieName}) > ${TITLE_SIMILARITY_THRESHOLD}
-        AND ST_DWithin(ta."location", ${origin}, ta."radiusKm" * 1000)
-        AND NOT EXISTS (
-          SELECT 1 FROM "AlertNotification" an
-          WHERE an."alertId" = ta.id AND an."listingId" = ${listing.id}
-        )
-    `;
-
-    for (const match of matches) {
-      try {
-        await smsProvider.send(
-          match.phone,
-          `GrabMySeats: a listing matching "${listing.movieName}" just showed up near you. Open the app before it's gone.`,
-        );
-        // Recorded even if a concurrent run somehow already inserted this
-        // exact pair - the unique constraint would reject the duplicate,
-        // caught below, without this notify having been a double-send
-        // (the SMS itself already went out; the insert failing just means
-        // bookkeeping for an SMS that already happened).
-        await prisma.alertNotification.create({
-          data: { alertId: match.alertId, listingId: listing.id },
-        });
-        notifiedCount += 1;
-      } catch (err) {
-        console.error(
-          `[jobs] matchAlerts failed for alert ${match.alertId} / listing ${listing.id}`,
-          err,
-        );
-      }
-    }
+  // 1. Match.
+  const matches = await findAlertMatches({ userIds: options.userIds }, now);
+  if (matches.length > 0) {
+    const created = await prisma.alertNotification.createMany({
+      data: matches.map((m) => ({ alertId: m.alertId, listingId: m.listingId, status: "PENDING" as const, notifiedAt: now })),
+      skipDuplicates: true,
+    });
+    result.matched = created.count;
   }
 
-  return notifiedCount;
+  const userScope = options.userIds ? { userId: { in: options.userIds } } : {};
+
+  // A push that never finished (crash, timeout) - it may have gone out, so
+  // it's never sent again.
+  const stale = await prisma.pushDelivery.findMany({
+    where: { ...userScope, status: "SENDING", createdAt: { lt: new Date(now.getTime() - STALE_SENDING_MS) } },
+    select: { id: true },
+  });
+  for (const { id } of stale) await finishDelivery(id, "SENT_UNCONFIRMED", "SENT_UNCONFIRMED", now);
+
+  // 2a. Retries of pushes every device turned away temporarily.
+  const retries = await prisma.pushDelivery.findMany({ where: { ...userScope, status: "RETRY" } });
+  for (const delivery of retries) {
+    const rows = await validPendingRows(now, { deliveryId: delivery.id });
+    // Matches that stopped being valid since (sold, paused, ...) drop out.
+    const dropped = await prisma.alertNotification.updateMany({
+      where: { deliveryId: delivery.id, status: "PENDING", id: { notIn: rows.map((r) => r.id) } },
+      data: { status: "SKIPPED" },
+    });
+    result.skipped += dropped.count;
+    if (rows.length === 0) {
+      await finishDelivery(delivery.id, "FAILED", "SKIPPED", now);
+      continue;
+    }
+    await prisma.pushDelivery.update({
+      where: { id: delivery.id },
+      data: { status: "SENDING", attempts: { increment: 1 } },
+    });
+    await sendDelivery(sender, delivery.id, delivery.userId, rows, delivery.attempts + 1, now, result);
+  }
+
+  // 2b. New matches, per user.
+  result.skipped += await skipInvalidPending(now, options.userIds);
+  const pending = await validPendingRows(now, { userIds: options.userIds, unassigned: true });
+  const byUser = new Map<string, PendingRow[]>();
+  for (const row of pending) byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row]);
+
+  for (const [userId, rows] of byUser) {
+    const tokens = await prisma.pushToken.count({ where: { userId } });
+    if (!sender || tokens === 0) {
+      await prisma.alertNotification.updateMany({
+        where: { id: { in: rows.map((r) => r.id) }, status: "PENDING", deliveryId: null },
+        data: { status: "IN_APP_ONLY" },
+      });
+      result.inAppOnly += rows.length;
+      continue;
+    }
+
+    const recent = await prisma.pushDelivery.count({
+      where: { userId, createdAt: { gt: new Date(now.getTime() - HOUR_MS) } },
+    });
+    if (recent >= PUSHES_PER_USER_PER_HOUR) continue; // wait - combined into a later push
+
+    const deliveryId = await claimRows(userId, rows, now);
+    if (!deliveryId) continue; // another run got there first
+    await sendDelivery(sender, deliveryId, userId, rows, 1, now, result);
+  }
+
+  return result;
+}
+
+// Creates the delivery and attaches the rows to it in one transaction - only
+// rows still unassigned, so two overlapping runs can't both send them.
+async function claimRows(userId: string, rows: PendingRow[], now: Date): Promise<string | null> {
+  return prisma.$transaction(async (tx) => {
+    const delivery = await tx.pushDelivery.create({
+      data: { userId, status: "SENDING", attempts: 1, matchCount: rows.length, createdAt: now },
+    });
+    const claimed = await tx.alertNotification.updateMany({
+      where: { id: { in: rows.map((r) => r.id) }, status: "PENDING", deliveryId: null },
+      data: { deliveryId: delivery.id },
+    });
+    if (claimed.count !== rows.length) {
+      throw new ClaimLostError();
+    }
+    return delivery.id;
+  }).catch((err) => {
+    if (err instanceof ClaimLostError) return null;
+    throw err;
+  });
+}
+
+class ClaimLostError extends Error {}
+
+async function sendDelivery(
+  sender: PushSender | null,
+  deliveryId: string,
+  userId: string,
+  rows: PendingRow[],
+  attempt: number,
+  now: Date,
+  result: MatchAlertsResult,
+): Promise<void> {
+  const tokens = (await prisma.pushToken.findMany({ where: { userId }, select: { token: true } })).map((t) => t.token);
+  if (!sender || tokens.length === 0) {
+    await finishDelivery(deliveryId, "FAILED", "IN_APP_ONLY", now);
+    result.inAppOnly += rows.length;
+    return;
+  }
+
+  const outcomes = await sender.send(tokens, buildMessage(rows));
+
+  const invalid = outcomes.filter((o) => o.outcome === "invalid-token").map((o) => o.token);
+  if (invalid.length > 0) await prisma.pushToken.deleteMany({ where: { token: { in: invalid } } });
+
+  const kinds = new Set(outcomes.map((o) => o.outcome));
+  if (kinds.has("sent")) {
+    await finishDelivery(deliveryId, "SENT", "SENT", now);
+    result.pushed += 1;
+  } else if (kinds.has("unknown")) {
+    await finishDelivery(deliveryId, "SENT_UNCONFIRMED", "SENT_UNCONFIRMED", now);
+  } else if (kinds.has("retryable") && attempt < MAX_ATTEMPTS) {
+    await prisma.pushDelivery.update({ where: { id: deliveryId }, data: { status: "RETRY" } });
+  } else if (invalid.length === outcomes.length) {
+    // Every device is gone: in-app only.
+    await finishDelivery(deliveryId, "FAILED", "IN_APP_ONLY", now);
+    result.inAppOnly += rows.length;
+  } else {
+    await finishDelivery(deliveryId, "FAILED", "FAILED", now);
+  }
+}
+
+async function finishDelivery(
+  deliveryId: string,
+  deliveryStatus: "SENT" | "SENT_UNCONFIRMED" | "FAILED",
+  rowStatus: "SENT" | "SENT_UNCONFIRMED" | "FAILED" | "IN_APP_ONLY" | "SKIPPED",
+  now: Date,
+): Promise<void> {
+  await prisma.$transaction([
+    prisma.pushDelivery.update({
+      where: { id: deliveryId },
+      data: { status: deliveryStatus, sentAt: deliveryStatus === "FAILED" ? null : now },
+    }),
+    prisma.alertNotification.updateMany({
+      where: { deliveryId, status: "PENDING" },
+      data: { status: rowStatus },
+    }),
+  ]);
+}
+
+// The same rule as matching (lib/alertMatching.ts), minus the name (which
+// can't have changed) and the "never matched before" part: whether a
+// pending match is still worth a push right now.
+const STILL_VALID = (now: Date) => Prisma.sql`
+  ta."isActive" = true
+  AND ta."expiresAt" > ${now}
+  AND buyer."suspendedAt" IS NULL AND buyer."deletedAt" IS NULL
+  AND l.status IN ('ACTIVE', 'PARTIALLY_SOLD')
+  AND l.showtime > ${showtimeClockNow(now.getTime())}
+  AND seller."suspendedAt" IS NULL AND seller."deletedAt" IS NULL
+  AND (l."availableSeats" - l."reservedSeats") >= ta."seatsWanted"
+`;
+
+const PENDING_JOIN = Prisma.sql`
+  FROM "AlertNotification" an
+  JOIN "TicketAlert" ta ON ta.id = an."alertId"
+  JOIN "User" buyer ON buyer.id = ta."userId"
+  JOIN "Listing" l ON l.id = an."listingId"
+  JOIN "User" seller ON seller.id = l."sellerId"
+`;
+
+async function skipInvalidPending(now: Date, userIds?: string[]): Promise<number> {
+  const scope = userIds
+    ? Prisma.sql`AND ta."userId" IN (${Prisma.join(userIds.length ? userIds : [""])})`
+    : Prisma.empty;
+  return prisma.$executeRaw`
+    UPDATE "AlertNotification" SET status = 'SKIPPED'
+    WHERE id IN (
+      SELECT an.id ${PENDING_JOIN}
+      WHERE an.status = 'PENDING' AND an."deliveryId" IS NULL
+        AND NOT (${STILL_VALID(now)})
+        ${scope}
+    )
+  `;
+}
+
+async function validPendingRows(
+  now: Date,
+  filter: { userIds?: string[]; unassigned?: boolean; deliveryId?: string },
+): Promise<PendingRow[]> {
+  const scope = filter.userIds
+    ? Prisma.sql`AND ta."userId" IN (${Prisma.join(filter.userIds.length ? filter.userIds : [""])})`
+    : Prisma.empty;
+  const assignment = filter.deliveryId
+    ? Prisma.sql`AND an."deliveryId" = ${filter.deliveryId}`
+    : filter.unassigned
+      ? Prisma.sql`AND an."deliveryId" IS NULL`
+      : Prisma.empty;
+  const rows = await prisma.$queryRaw<PendingRow[]>`
+    SELECT an.id, ta."userId", l.id AS "listingId", l."movieName", l.showtime,
+           (l."availableSeats" - l."reservedSeats") AS "freeSeats",
+           ta."cityId" AS "alertCityId", (ta.location IS NOT NULL) AS "alertHasPoint"
+    ${PENDING_JOIN}
+    WHERE an.status = 'PENDING'
+      AND ${STILL_VALID(now)}
+      ${assignment}
+      ${scope}
+    ORDER BY an."notifiedAt", an.id
+  `;
+  return rows.map((r) => ({ ...r, freeSeats: Number(r.freeSeats) }));
+}
+
+// Event names are typed by sellers: one line, no links, at most NAME_MAX
+// characters - our notification never carries anyone's free text as-is.
+export function cleanEventName(name: string): string {
+  const cleaned = name
+    .replace(/https?:\/\/\S+|www\.\S+/gi, " ")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length > NAME_MAX ? `${cleaned.slice(0, NAME_MAX - 1).trimEnd()}…` : cleaned;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// No personal data and nothing about the seller: event, date, seats, and
+// where relative to the alert ("near you" / "in <city>").
+export function buildMessage(rows: PendingRow[]): PushMessage {
+  if (rows.length === 1) {
+    const [row] = rows;
+    // India wall-clock in the UTC fields (see shared/src/showtime.ts).
+    const date = `${row.showtime.getUTCDate()} ${MONTHS[row.showtime.getUTCMonth()]}`;
+    const seats = `${row.freeSeats} seat${row.freeSeats === 1 ? "" : "s"}`;
+    const city = row.alertCityId ? cityNameForId(row.alertCityId) : null;
+    const where = row.alertHasPoint ? " near you" : city ? ` in ${city}` : "";
+    return {
+      title: "Tickets available",
+      body: `${cleanEventName(row.movieName)}, ${date} - ${seats}${where}`,
+      path: `/buy/${row.listingId}`,
+    };
+  }
+
+  // Soonest show first, then by name - a stable order for the same matches.
+  const ordered = [...rows].sort(
+    (a, b) =>
+      a.showtime.getTime() - b.showtime.getTime() ||
+      (a.movieName.toLowerCase() < b.movieName.toLowerCase() ? -1 : a.movieName.toLowerCase() > b.movieName.toLowerCase() ? 1 : 0),
+  );
+  const names = [...new Set(ordered.map((r) => cleanEventName(r.movieName)))];
+  const shown = names.slice(0, 2);
+  const more = names.length - shown.length;
+  const list = more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(" and ");
+  return {
+    title: "Tickets available",
+    body: `${rows.length} new matches: ${list}`,
+    path: "/account/alerts",
+  };
 }

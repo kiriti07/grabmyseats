@@ -73,8 +73,13 @@ export function startJobs(): void {
     "*/5 * * * *",
     async () => {
       try {
-        const count = await matchAlerts();
-        if (count > 0) console.log(`[jobs] notified ${count} ticket alert(s)`);
+        const { matched, pushed, inAppOnly, skipped } = await matchAlerts();
+        if (matched + pushed + inAppOnly + skipped > 0) {
+          console.log(
+            `[jobs] ticket alerts: ${matched} new match(es), ${pushed} push(es), ` +
+              `${inAppOnly} in-app only, ${skipped} skipped`,
+          );
+        }
       } catch (err) {
         console.error("[jobs] matchAlerts failed", err);
       }

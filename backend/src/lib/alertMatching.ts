@@ -41,11 +41,14 @@ interface CandidateRow extends AlertMatch {
 }
 
 export async function findAlertMatches(
-  filter: { alertIds?: string[]; listingIds?: string[] } = {},
+  filter: { alertIds?: string[]; listingIds?: string[]; userIds?: string[] } = {},
   now: Date = new Date(),
 ): Promise<AlertMatch[]> {
   const alertFilter = filter.alertIds
     ? Prisma.sql`AND ta.id IN (${Prisma.join(filter.alertIds.length ? filter.alertIds : [""])})`
+    : Prisma.empty;
+  const userFilter = filter.userIds
+    ? Prisma.sql`AND ta."userId" IN (${Prisma.join(filter.userIds.length ? filter.userIds : [""])})`
     : Prisma.empty;
   const listingFilter = filter.listingIds
     ? Prisma.sql`AND l.id IN (${Prisma.join(filter.listingIds.length ? filter.listingIds : [""])})`
@@ -83,6 +86,7 @@ export async function findAlertMatches(
         WHERE an."alertId" = ta.id AND an."listingId" = l.id
       )
       ${alertFilter}
+      ${userFilter}
       ${listingFilter}
   `;
 
