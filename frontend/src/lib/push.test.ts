@@ -27,7 +27,22 @@ const plugin = {
     return { remove: async () => {} };
   }),
 };
-vi.mock("@capacitor/push-notifications", () => ({ PushNotifications: plugin }));
+// Like Capacitor's real plugin object: a Proxy that turns any property it
+// doesn't know - "then" included - into a native call that never answers.
+// Resolving a promise with the bare plugin therefore hangs, as on a phone.
+const nativeThenCalls = vi.fn();
+const pluginProxy = new Proxy(plugin, {
+  get(target, prop, receiver) {
+    if (prop === "then") {
+      return () => {
+        nativeThenCalls();
+        return new Promise(() => {});
+      };
+    }
+    return Reflect.get(target, prop, receiver);
+  },
+});
+vi.mock("@capacitor/push-notifications", () => ({ PushNotifications: pluginProxy }));
 
 class FakeApiError extends Error {
   constructor(message: string, public status: number) {
@@ -70,7 +85,7 @@ describe("push (Android app only)", () => {
     ["the website", { native: false, platform: "web", pluginAvailable: false }],
     ["an old APK without the plugin", { native: true, platform: "android", pluginAvailable: false }],
     ["iOS", { native: true, platform: "ios", pluginAvailable: true }],
-  ])("does nothing on %s", async (_label, env) => {
+  ])("never loads or calls the plugin on %s", async (_label, env) => {
     Object.assign(runtime, env);
     const push = await freshPush();
     expect(push.pushSupported()).toBe(false);
@@ -78,13 +93,57 @@ describe("push (Android app only)", () => {
     expect(await push.requestPushPermission()).toBe("unsupported");
     await push.startPush(() => {}, () => {});
     await push.stopPush();
-    expect(await push.refreshPushStatus()).toEqual({ state: "unsupported" });
-    expect(await push.retryPushRegistration()).toEqual({ state: "unsupported" });
-    expect(push.pushStatusText(push.getPushStatus())).toBeNull();
+    await push.refreshPushStatus();
+    await push.retryPushRegistration();
     for (const fn of [plugin.checkPermissions, plugin.requestPermissions, plugin.register, plugin.addListener, plugin.unregister]) {
       expect(fn).not.toHaveBeenCalled();
     }
     expect(api.registerPushToken).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the website", { native: false, platform: "web", pluginAvailable: false }],
+    ["iOS", { native: true, platform: "ios", pluginAvailable: true }],
+  ])("no status line on %s", async (_label, env) => {
+    Object.assign(runtime, env);
+    const push = await freshPush();
+    expect(push.isAndroidApp()).toBe(false);
+    expect(await push.refreshPushStatus()).toEqual({ state: "unsupported" });
+    expect(push.pushStatusText(push.getPushStatus())).toBeNull();
+  });
+
+  it("an Android build without the plugin says so, without trying to load it", async () => {
+    Object.assign(runtime, { native: true, platform: "android", pluginAvailable: false });
+    const push = await freshPush();
+    expect(push.isAndroidApp()).toBe(true);
+    expect(push.pushDiagnostics()).toEqual({ platform: "android", plugin: "plugin not in this app build" });
+    expect(await push.retryPushRegistration()).toEqual({ state: "error", reason: "plugin not in this app build" });
+    expect(push.pushStatusText(push.getPushStatus())).toBe("Notifications: error – plugin not in this app build");
+  });
+
+  it("diagnostics: the platform and that the plugin is present", async () => {
+    const push = await freshPush();
+    expect(push.pushDiagnostics()).toEqual({ platform: "android", plugin: "plugin present" });
+  });
+
+  it("the plugin is never resolved as a thenable (Capacitor's proxy trap) - registration completes", async () => {
+    // The fake really is a trap: awaiting it directly never settles.
+    const settled = await Promise.race([
+      Promise.resolve(pluginProxy).then(() => "settled"),
+      new Promise((r) => setTimeout(() => r("hung"), 20)),
+    ]);
+    expect(settled).toBe("hung");
+    nativeThenCalls.mockClear();
+
+    plugin.permission = "granted";
+    const push = await freshPush();
+    await push.startPush(() => {}, () => {});
+    await vi.waitFor(() => expect(push.getPushStatus()).toEqual({ state: "registered" }));
+    await push.retryPushRegistration();
+    await push.requestPushPermission();
+    await push.refreshPushStatus();
+    await push.stopPush();
+    expect(nativeThenCalls).not.toHaveBeenCalled();
   });
 
   it("permission granted: creates the alerts channel, registers, and sends the token", async () => {

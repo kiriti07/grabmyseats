@@ -19,20 +19,49 @@ const TOKEN_KEY = "gms_push_token";
 // Where a tapped notification may take the user - nothing else.
 const SAFE_PATH = /^\/(buy\/[A-Za-z0-9_-]+|account\/alerts)$/;
 
-export function pushSupported(): boolean {
+// Inside the Android app at all (where the My Alerts status line shows),
+// whether or not this app build has the push plugin.
+export function isAndroidApp(): boolean {
   try {
-    return (
-      Capacitor.isNativePlatform() &&
-      Capacitor.getPlatform() === "android" &&
-      Capacitor.isPluginAvailable("PushNotifications")
-    );
+    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
   } catch {
     return false;
   }
 }
 
-async function plugin() {
-  return (await import("@capacitor/push-notifications")).PushNotifications;
+// Whether the native push plugin is in this app build - checked before
+// anything tries to load it.
+export function pushPluginAvailable(): boolean {
+  try {
+    return Capacitor.isPluginAvailable("PushNotifications");
+  } catch {
+    return false;
+  }
+}
+
+export function pushSupported(): boolean {
+  return isAndroidApp() && pushPluginAvailable();
+}
+
+// For the status line: the platform and whether the plugin is present.
+export function pushDiagnostics(): { platform: string; plugin: "plugin present" | "plugin not in this app build" } {
+  let platform = "unknown";
+  try {
+    platform = Capacitor.getPlatform();
+  } catch {
+    // Keep "unknown".
+  }
+  return { platform, plugin: pushPluginAvailable() ? "plugin present" : "plugin not in this app build" };
+}
+
+// Returned wrapped, never as itself: a Capacitor plugin is a Proxy that
+// turns ANY property into a native call - "then" included - so a promise
+// resolving with the bare plugin (an async function's return value, an
+// await, Promise.race) treats it as a thenable and waits for a native
+// "then" that never answers. Only ever await the plugin's methods.
+async function loadPlugin(): Promise<{ push: typeof import("@capacitor/push-notifications").PushNotifications }> {
+  const { PushNotifications } = await import("@capacitor/push-notifications");
+  return { push: PushNotifications };
 }
 
 function storage(): Storage | null {
@@ -45,7 +74,7 @@ function storage(): Storage | null {
 
 export async function pushPermission(): Promise<PushPermission> {
   if (!pushSupported()) return "unsupported";
-  const push = await withTimeout(plugin(), "loading the push plugin");
+  const { push } = await withTimeout(loadPlugin(), "loading the push plugin");
   const { receive } = await withTimeout(push.checkPermissions(), "checking permission");
   return receive === "granted" ? "granted" : receive === "denied" ? "denied" : "prompt";
 }
@@ -114,8 +143,14 @@ function setStatus(next: PushStatus): void {
   statusListeners.forEach((fn) => fn(next));
 }
 
+export const PLUGIN_MISSING_REASON = "plugin not in this app build";
+
+// Outside the Android app: no status line. In an Android build without the
+// push plugin (older APKs): an error saying so, without trying to load it.
 export function getPushStatus(): PushStatus {
-  return pushSupported() ? status : { state: "unsupported" };
+  if (!isAndroidApp()) return { state: "unsupported" };
+  if (!pushPluginAvailable()) return { state: "error", reason: PLUGIN_MISSING_REASON };
+  return status;
 }
 
 export function subscribePushStatus(fn: (s: PushStatus) => void): () => void {
@@ -206,7 +241,7 @@ async function registerDevice(): Promise<void> {
   tokenReceived = false;
   setStatus({ state: "registering" });
   try {
-    const push = await withTimeout(plugin(), "loading the push plugin");
+    const { push } = await withTimeout(loadPlugin(), "loading the push plugin");
     registrationListeners ??= Promise.all([
       push.addListener("registration", ({ value }) => void sendToken(value)),
       push.addListener("registrationError", ({ error }) => onRegistrationError(error)),
@@ -249,7 +284,7 @@ export async function requestPushPermission(): Promise<PushPermission> {
   if (!pushSupported()) return "unsupported";
   let receive: string;
   try {
-    ({ receive } = await (await plugin()).requestPermissions());
+    ({ receive } = await (await loadPlugin()).push.requestPermissions());
   } catch (err) {
     fail("permission", err);
     throw err;
@@ -266,7 +301,7 @@ export async function requestPushPermission(): Promise<PushPermission> {
 // My Alerts' status line on open: the permission as Android has it now;
 // with permission granted, whatever registration last reported.
 export async function refreshPushStatus(): Promise<PushStatus> {
-  if (!pushSupported()) return { state: "unsupported" };
+  if (!pushSupported()) return getPushStatus();
   try {
     const permission = await pushPermission();
     if (permission !== "granted") setStatus(statusForPermission(permission));
@@ -281,7 +316,7 @@ export async function refreshPushStatus(): Promise<PushStatus> {
 // again (a new POST of the token). Denied stays denied - only phone
 // Settings can change that.
 export async function retryPushRegistration(): Promise<PushStatus> {
-  if (!pushSupported()) return { state: "unsupported" };
+  if (!pushSupported()) return getPushStatus();
   try {
     const permission = await pushPermission();
     if (permission === "granted") await registerDevice();
@@ -302,7 +337,7 @@ let foregroundListener: Promise<PluginListenerHandle> | null = null;
 export async function startPush(navigate: (path: string) => void, onForegroundMatch: () => void): Promise<void> {
   if (!pushSupported()) return;
   try {
-    const push = await withTimeout(plugin(), "loading the push plugin");
+    const { push } = await withTimeout(loadPlugin(), "loading the push plugin");
     tapListener ??= push.addListener("pushNotificationActionPerformed", ({ notification }) => {
       const path = notification.data?.path;
       if (typeof path === "string" && SAFE_PATH.test(path)) navigate(path);
@@ -342,7 +377,7 @@ export async function stopPush(): Promise<void> {
       // Nothing to clean up then.
     }
   }
-  await (await plugin()).unregister().catch((err) => {
+  await (await loadPlugin()).push.unregister().catch((err) => {
     console.warn(`[push] unregister failed - ${describePushError(err)}`);
   });
   setStatus({ state: "not-registered" });

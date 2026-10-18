@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import {
   getPushStatus,
+  isAndroidApp,
+  PLUGIN_MISSING_REASON,
+  pushDiagnostics,
   pushStatusText,
-  pushSupported,
   refreshPushStatus,
   retryPushRegistration,
   subscribePushStatus,
@@ -17,12 +19,14 @@ import {
 // Never shows the token.
 export function PushStatusLine() {
   const [supported, setSupported] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<ReturnType<typeof pushDiagnostics> | null>(null);
   const [status, setStatus] = useState<PushStatus>({ state: "unsupported" });
   const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
-    if (!pushSupported()) return;
+    if (!isAndroidApp()) return;
     setSupported(true);
+    setDiagnostics(pushDiagnostics());
     setStatus(getPushStatus());
     const unsubscribe = subscribePushStatus(setStatus);
     refreshPushStatus().catch(() => {});
@@ -42,6 +46,7 @@ export function PushStatusLine() {
   }
 
   const busy = retrying || status.state === "registering";
+  const pluginMissing = status.state === "error" && status.reason === PLUGIN_MISSING_REASON;
   const tone =
     status.state === "registered" ? "text-success" : status.state === "error" ? "text-error" : "text-muted";
 
@@ -53,14 +58,23 @@ export function PushStatusLine() {
           To turn them on, open your phone&apos;s Settings → Apps → GrabMySeats → Notifications.
         </p>
       )}
-      <button
-        type="button"
-        onClick={retry}
-        disabled={busy}
-        className="mt-2 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-60"
-      >
-        {busy ? "Trying…" : "Try again"}
-      </button>
+      {pluginMissing ? (
+        <p className="mt-1 text-xs text-muted">Install the latest version of the app to get notifications.</p>
+      ) : (
+        <button
+          type="button"
+          onClick={retry}
+          disabled={busy}
+          className="mt-2 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-60"
+        >
+          {busy ? "Trying…" : "Try again"}
+        </button>
+      )}
+      {diagnostics && (
+        <p className="mt-2 text-[11px] text-muted">
+          {diagnostics.platform} · {diagnostics.plugin}
+        </p>
+      )}
     </div>
   );
 }
