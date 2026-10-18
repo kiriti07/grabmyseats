@@ -45,8 +45,40 @@ function storage(): Storage | null {
 
 export async function pushPermission(): Promise<PushPermission> {
   if (!pushSupported()) return "unsupported";
-  const { receive } = await (await plugin()).checkPermissions();
+  const push = await withTimeout(plugin(), "loading the push plugin");
+  const { receive } = await withTimeout(push.checkPermissions(), "checking permission");
   return receive === "granted" ? "granted" : receive === "denied" ? "denied" : "prompt";
+}
+
+// Every native call in registration gets this long, and so does Firebase to
+// send a token after register() - nothing may leave the status line on
+// "registering" for ever. (The permission prompt itself has no limit: the
+// user may take their time.)
+export const REGISTER_TIMEOUT_MS = 15_000;
+export const TOKEN_TIMEOUT_REASON = "timed out getting a device token (Google Play services / Firebase config?)";
+
+class StepTimeout extends Error {
+  constructor() {
+    super("timed out");
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, step: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new StepTimeout(), { step })), REGISTER_TIMEOUT_MS);
+  });
+  return Promise.race([
+    promise.catch((err) => {
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { step });
+    }),
+    timeout,
+  ]).finally(() => clearTimeout(timer));
+}
+
+function stepOf(err: unknown): string | null {
+  const step = (err as { step?: unknown } | null)?.step;
+  return typeof step === "string" ? step : null;
 }
 
 // Whether the "get notified on this phone?" explanation has been shown
@@ -74,19 +106,10 @@ export type PushStatus =
   | { state: "denied" }
   | { state: "error"; reason: string };
 
-// No token from Firebase within this long after register() is an error,
-// not "still registering" forever.
-export const REGISTER_TIMEOUT_MS = 30_000;
-
 let status: PushStatus = { state: "not-registered" };
 const statusListeners = new Set<(s: PushStatus) => void>();
-let registerTimer: ReturnType<typeof setTimeout> | null = null;
 
 function setStatus(next: PushStatus): void {
-  if (next.state !== "registering" && registerTimer) {
-    clearTimeout(registerTimer);
-    registerTimer = null;
-  }
   status = next;
   statusListeners.forEach((fn) => fn(next));
 }
@@ -135,16 +158,25 @@ export function describePushError(err: unknown): string {
     reason = "unknown error";
   }
   reason = reason.replace(/[A-Za-z0-9_:\-.]{40,}/g, "…").replace(/\s+/g, " ").trim();
-  return reason.length > 80 ? `${reason.slice(0, 79)}…` : reason;
+  return reason.length > 120 ? `${reason.slice(0, 119)}…` : reason;
 }
 
-function fail(step: string, err: unknown): void {
-  const reason = `${step}: ${describePushError(err)}`;
+// step null: the reason stands alone (Firebase's own registrationError
+// message, the token timeout).
+function fail(step: string | null, err: unknown): void {
+  const reason = step ? `${step}: ${describePushError(err)}` : describePushError(err);
   console.warn(`[push] registration failed - ${reason}`);
   setStatus({ state: "error", reason });
 }
 
+// Each registerDevice() run; events and timers of an older run never
+// overwrite a newer one's result.
+let attempt = 0;
+let tokenReceived = false;
+
 async function sendToken(value: string): Promise<void> {
+  const mine = attempt;
+  tokenReceived = true;
   try {
     storage()?.setItem(TOKEN_KEY, value);
   } catch {
@@ -152,41 +184,58 @@ async function sendToken(value: string): Promise<void> {
   }
   try {
     await registerPushToken(value);
-    setStatus({ state: "registered" });
+    if (mine === attempt) setStatus({ state: "registered" });
   } catch (err) {
-    fail("saving the device", err);
+    if (mine === attempt) fail("saving the device", err);
   }
+}
+
+function onRegistrationError(error: unknown): void {
+  fail(null, error || "registration error from Firebase");
 }
 
 let registrationListeners: Promise<PluginListenerHandle[]> | null = null;
 
-// Gets this device's token (the plugin's "registration" event, fired on
-// register() and whenever FCM refreshes it) and sends it to the server for
-// the signed-in account. Every failure ends in an "error" status.
+// Gets this device's token (the plugin's "registration" event, fired after
+// register() and whenever FCM refreshes it - or "registrationError") and
+// sends it to the server for the signed-in account. Always ends in
+// "registered" or "error" within REGISTER_TIMEOUT_MS per step, and the same
+// again for the token after register().
 async function registerDevice(): Promise<void> {
+  const mine = ++attempt;
+  tokenReceived = false;
   setStatus({ state: "registering" });
   try {
-    const push = await plugin();
+    const push = await withTimeout(plugin(), "loading the push plugin");
     registrationListeners ??= Promise.all([
       push.addListener("registration", ({ value }) => void sendToken(value)),
-      push.addListener("registrationError", ({ error }) => fail("Firebase", error)),
+      push.addListener("registrationError", ({ error }) => onRegistrationError(error)),
     ]);
-    await registrationListeners;
-    await push.createChannel({
-      id: CHANNEL_ID,
-      name: "Ticket alerts",
-      description: "When tickets matching your alerts are listed",
-      importance: 4,
-      visibility: 1,
-    });
-    if (registerTimer) clearTimeout(registerTimer);
-    registerTimer = setTimeout(() => {
-      registerTimer = null;
-      if (status.state === "registering") fail("Firebase", "no token received");
+    try {
+      await withTimeout(registrationListeners, "adding the token listeners");
+    } catch (err) {
+      registrationListeners = null; // a stuck or failed attempt is never reused
+      throw err;
+    }
+    await withTimeout(
+      push.createChannel({
+        id: CHANNEL_ID,
+        name: "Ticket alerts",
+        description: "When tickets matching your alerts are listed",
+        importance: 4,
+        visibility: 1,
+      }),
+      "creating the notification channel",
+    );
+    // register() returns at once; the token (or the error) comes as an event.
+    setTimeout(() => {
+      if (mine !== attempt || status.state !== "registering") return;
+      if (tokenReceived) fail("saving the device", "no answer from the server");
+      else fail(null, TOKEN_TIMEOUT_REASON);
     }, REGISTER_TIMEOUT_MS);
-    await push.register();
+    await withTimeout(push.register(), "register()");
   } catch (err) {
-    fail("register", err);
+    if (mine === attempt) fail(stepOf(err) ?? "register", err);
   }
 }
 
@@ -223,7 +272,7 @@ export async function refreshPushStatus(): Promise<PushStatus> {
     if (permission !== "granted") setStatus(statusForPermission(permission));
     else if (status.state === "denied") setStatus({ state: "not-registered" });
   } catch (err) {
-    fail("permission", err);
+    fail(stepOf(err) ?? "permission", err);
   }
   return status;
 }
@@ -239,7 +288,7 @@ export async function retryPushRegistration(): Promise<PushStatus> {
     else if (permission === "prompt") await requestPushPermission();
     else setStatus({ state: "denied" });
   } catch (err) {
-    if (status.state !== "error") fail("permission", err);
+    if (status.state !== "error") fail(stepOf(err) ?? "permission", err);
   }
   return status;
 }
@@ -252,16 +301,28 @@ let foregroundListener: Promise<PluginListenerHandle> | null = null;
 // notification is tapped - also when the tap started the app.
 export async function startPush(navigate: (path: string) => void, onForegroundMatch: () => void): Promise<void> {
   if (!pushSupported()) return;
-  const push = await plugin();
-  tapListener ??= push.addListener("pushNotificationActionPerformed", ({ notification }) => {
-    const path = notification.data?.path;
-    if (typeof path === "string" && SAFE_PATH.test(path)) navigate(path);
-  });
-  await tapListener;
-  // With the app open Android shows nothing - refresh the My Alerts dot.
-  foregroundListener ??= push.addListener("pushNotificationReceived", () => onForegroundMatch());
-  await foregroundListener;
-  const permission = await pushPermission();
+  try {
+    const push = await withTimeout(plugin(), "loading the push plugin");
+    tapListener ??= push.addListener("pushNotificationActionPerformed", ({ notification }) => {
+      const path = notification.data?.path;
+      if (typeof path === "string" && SAFE_PATH.test(path)) navigate(path);
+    });
+    // With the app open Android shows nothing - refresh the My Alerts dot.
+    foregroundListener ??= push.addListener("pushNotificationReceived", () => onForegroundMatch());
+    await withTimeout(Promise.all([tapListener, foregroundListener]), "adding the notification listeners");
+  } catch (err) {
+    // Taps may not open the right page, but registration still goes ahead.
+    tapListener = null;
+    foregroundListener = null;
+    console.warn(`[push] ${stepOf(err) ?? "listeners"} failed - ${describePushError(err)}`);
+  }
+  let permission: PushPermission;
+  try {
+    permission = await pushPermission();
+  } catch (err) {
+    fail(stepOf(err) ?? "permission", err);
+    return;
+  }
   if (permission === "granted") await registerDevice();
   else setStatus(statusForPermission(permission));
 }

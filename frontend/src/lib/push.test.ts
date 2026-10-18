@@ -210,8 +210,9 @@ describe("push (Android app only)", () => {
       });
       const push = await freshPush();
       await push.requestPushPermission();
-      expect(push.getPushStatus()).toEqual({ state: "error", reason: "Firebase: SERVICE_NOT_AVAILABLE" });
-      expect(warned()).toContain("Firebase: SERVICE_NOT_AVAILABLE");
+      expect(push.getPushStatus()).toEqual({ state: "error", reason: "SERVICE_NOT_AVAILABLE" });
+      expect(push.pushStatusText(push.getPushStatus())).toBe("Notifications: error – SERVICE_NOT_AVAILABLE");
+      expect(warned()).toContain("SERVICE_NOT_AVAILABLE");
       expect(api.registerPushToken).not.toHaveBeenCalled();
     });
 
@@ -220,19 +221,93 @@ describe("push (Android app only)", () => {
       plugin.register.mockRejectedValueOnce(new Error("Default FirebaseApp is not initialized"));
       const push = await freshPush();
       await push.requestPushPermission();
-      expect(push.getPushStatus()).toEqual({ state: "error", reason: "register: Default FirebaseApp is not initialized" });
+      expect(push.getPushStatus()).toEqual({ state: "error", reason: "register(): Default FirebaseApp is not initialized" });
       expect(warn).toHaveBeenCalled();
     });
 
-    it("no token from Firebase in time: error", async () => {
+    it("no token from Firebase in time: the timeout reason, within 15 s", async () => {
       vi.useFakeTimers();
       plugin.permission = "granted";
       plugin.register.mockImplementationOnce(async () => {});
       const push = await freshPush();
       await push.requestPushPermission();
       expect(push.pushStatusText(push.getPushStatus())).toBe("Notifications: not registered yet");
+      await vi.advanceTimersByTimeAsync(push.REGISTER_TIMEOUT_MS - 1);
+      expect(push.getPushStatus().state).toBe("registering");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(push.REGISTER_TIMEOUT_MS).toBe(15_000);
+      expect(push.pushStatusText(push.getPushStatus())).toBe(
+        "Notifications: error – timed out getting a device token (Google Play services / Firebase config?)",
+      );
+      expect(warned()).toContain("timed out getting a device token");
+    });
+
+    const never = () => new Promise<never>(() => {});
+
+    it.each([
+      ["addListener", "adding the token listeners: timed out"],
+      ["createChannel", "creating the notification channel: timed out"],
+      ["register", "register(): timed out"],
+      ["checkPermissions", "checking permission: timed out"],
+    ] as const)("a native %s that never answers ends in an error, not 'Trying…' for ever", async (method, reason) => {
+      vi.useFakeTimers();
+      plugin.permission = "granted";
+      const push = await freshPush();
+      (plugin[method] as unknown as { mockImplementationOnce: (f: () => Promise<never>) => void }).mockImplementationOnce(never);
+      const retry = push.retryPushRegistration();
       await vi.advanceTimersByTimeAsync(push.REGISTER_TIMEOUT_MS);
-      expect(push.getPushStatus()).toEqual({ state: "error", reason: "Firebase: no token received" });
+      await retry;
+      expect(push.getPushStatus()).toEqual({ state: "error", reason });
+      expect(warned()).toContain(reason);
+    });
+
+    it("a stuck listener isn't reused: Try again adds it afresh and can succeed", async () => {
+      vi.useFakeTimers();
+      plugin.permission = "granted";
+      const push = await freshPush();
+      plugin.addListener.mockImplementationOnce(never);
+      const first = push.retryPushRegistration();
+      await vi.advanceTimersByTimeAsync(push.REGISTER_TIMEOUT_MS);
+      await first;
+      expect(push.getPushStatus().state).toBe("error");
+      await push.retryPushRegistration();
+      await vi.waitFor(() => expect(push.getPushStatus()).toEqual({ state: "registered" }));
+    });
+
+    it("token received but the server never answers: error, not 'Trying…'", async () => {
+      vi.useFakeTimers();
+      plugin.permission = "granted";
+      api.registerPushToken.mockImplementationOnce(never);
+      const push = await freshPush();
+      await push.requestPushPermission();
+      await vi.advanceTimersByTimeAsync(push.REGISTER_TIMEOUT_MS);
+      expect(push.getPushStatus()).toEqual({ state: "error", reason: "saving the device: no answer from the server" });
+    });
+
+    it("an older attempt's timer never overwrites a newer success", async () => {
+      vi.useFakeTimers();
+      plugin.permission = "granted";
+      plugin.register.mockImplementationOnce(async () => {});
+      const push = await freshPush();
+      await push.requestPushPermission();
+      await vi.advanceTimersByTimeAsync(push.REGISTER_TIMEOUT_MS / 2);
+      await push.retryPushRegistration();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(push.getPushStatus()).toEqual({ state: "registered" });
+      await vi.advanceTimersByTimeAsync(push.REGISTER_TIMEOUT_MS);
+      expect(push.getPushStatus()).toEqual({ state: "registered" });
+    });
+
+    it("app start: stuck tap listeners don't block registration", async () => {
+      vi.useFakeTimers();
+      plugin.permission = "granted";
+      const push = await freshPush();
+      plugin.addListener.mockImplementationOnce(never);
+      const start = push.startPush(() => {}, () => {});
+      await vi.advanceTimersByTimeAsync(push.REGISTER_TIMEOUT_MS);
+      await start;
+      expect(warned()).toContain("adding the notification listeners failed - timed out");
+      expect(push.getPushStatus()).toEqual({ state: "registered" });
     });
 
     it("permission denied / not asked yet", async () => {
