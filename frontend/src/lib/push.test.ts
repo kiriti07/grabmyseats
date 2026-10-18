@@ -29,7 +29,16 @@ const plugin = {
 };
 vi.mock("@capacitor/push-notifications", () => ({ PushNotifications: plugin }));
 
-const api = { registerPushToken: vi.fn(async () => ({ registered: true })), removePushToken: vi.fn(async () => ({ removed: true })) };
+class FakeApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+const api = {
+  ApiError: FakeApiError,
+  registerPushToken: vi.fn(async (): Promise<{ registered: true }> => ({ registered: true })),
+  removePushToken: vi.fn(async (): Promise<{ removed: true }> => ({ removed: true })),
+};
 vi.mock("@/lib/api", () => api);
 
 const store = new Map<string, string>();
@@ -69,6 +78,9 @@ describe("push (Android app only)", () => {
     expect(await push.requestPushPermission()).toBe("unsupported");
     await push.startPush(() => {}, () => {});
     await push.stopPush();
+    expect(await push.refreshPushStatus()).toEqual({ state: "unsupported" });
+    expect(await push.retryPushRegistration()).toEqual({ state: "unsupported" });
+    expect(push.pushStatusText(push.getPushStatus())).toBeNull();
     for (const fn of [plugin.checkPermissions, plugin.requestPermissions, plugin.register, plugin.addListener, plugin.unregister]) {
       expect(fn).not.toHaveBeenCalled();
     }
@@ -142,6 +154,136 @@ describe("push (Android app only)", () => {
     expect(api.removePushToken).toHaveBeenCalledWith("fake-token-device-1");
     expect(plugin.unregister).toHaveBeenCalled();
     expect(store.has("gms_push_token")).toBe(false);
+  });
+
+  describe("status line (real registration result)", () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => {
+      warn.mockRestore();
+      vi.useRealTimers();
+    });
+    const warned = () => warn.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
+
+    it("token saved on the server: on (registered), nothing logged", async () => {
+      plugin.permission = "granted";
+      const push = await freshPush();
+      expect(push.getPushStatus()).toEqual({ state: "not-registered" });
+      await push.requestPushPermission();
+      await vi.waitFor(() => expect(push.getPushStatus()).toEqual({ state: "registered" }));
+      expect(push.pushStatusText(push.getPushStatus())).toBe("Notifications: on (registered)");
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("saving the device fails: error with the reason, and a console warning - never the token", async () => {
+      plugin.permission = "granted";
+      api.registerPushToken.mockRejectedValueOnce(new FakeApiError("boom", 500));
+      const push = await freshPush();
+      await push.requestPushPermission();
+      await vi.waitFor(() => expect(push.getPushStatus().state).toBe("error"));
+      expect(push.pushStatusText(push.getPushStatus())).toBe("Notifications: error – saving the device: server error (500)");
+      expect(warned()).toContain("saving the device: server error (500)");
+      expect(warned()).not.toContain("fake-token");
+    });
+
+    it.each([
+      [new FakeApiError("x", 0), "can't reach the server"],
+      [new FakeApiError("x", 401), "not signed in"],
+      [new FakeApiError("x", 400), "server rejected the device (400)"],
+    ])("describes API failures briefly (%#)", async (err, reason) => {
+      const push = await freshPush();
+      expect(push.describePushError(err)).toBe(reason);
+    });
+
+    it("cuts token-like strings out of any reason", async () => {
+      const push = await freshPush();
+      const reason = push.describePushError(new Error(`bad token ${"a1B2c3D4e5".repeat(8)} here`));
+      expect(reason).toBe("bad token … here");
+    });
+
+    it("Firebase registration error: error status and a warning", async () => {
+      plugin.permission = "granted";
+      plugin.register.mockImplementationOnce(async () => {
+        for (const l of listeners.registrationError ?? []) l({ error: "SERVICE_NOT_AVAILABLE" });
+      });
+      const push = await freshPush();
+      await push.requestPushPermission();
+      expect(push.getPushStatus()).toEqual({ state: "error", reason: "Firebase: SERVICE_NOT_AVAILABLE" });
+      expect(warned()).toContain("Firebase: SERVICE_NOT_AVAILABLE");
+      expect(api.registerPushToken).not.toHaveBeenCalled();
+    });
+
+    it("register() throwing is an error, not swallowed", async () => {
+      plugin.permission = "granted";
+      plugin.register.mockRejectedValueOnce(new Error("Default FirebaseApp is not initialized"));
+      const push = await freshPush();
+      await push.requestPushPermission();
+      expect(push.getPushStatus()).toEqual({ state: "error", reason: "register: Default FirebaseApp is not initialized" });
+      expect(warn).toHaveBeenCalled();
+    });
+
+    it("no token from Firebase in time: error", async () => {
+      vi.useFakeTimers();
+      plugin.permission = "granted";
+      plugin.register.mockImplementationOnce(async () => {});
+      const push = await freshPush();
+      await push.requestPushPermission();
+      expect(push.pushStatusText(push.getPushStatus())).toBe("Notifications: not registered yet");
+      await vi.advanceTimersByTimeAsync(push.REGISTER_TIMEOUT_MS);
+      expect(push.getPushStatus()).toEqual({ state: "error", reason: "Firebase: no token received" });
+    });
+
+    it("permission denied / not asked yet", async () => {
+      plugin.permission = "denied";
+      const push = await freshPush();
+      await push.requestPushPermission();
+      expect(push.pushStatusText(push.getPushStatus())).toBe("Notifications: permission denied");
+      plugin.permission = "prompt";
+      expect(await push.refreshPushStatus()).toEqual({ state: "not-registered" });
+    });
+
+    it("Try again after a failure re-registers and re-sends the token", async () => {
+      plugin.permission = "granted";
+      api.registerPushToken.mockRejectedValueOnce(new FakeApiError("x", 0));
+      const push = await freshPush();
+      await push.requestPushPermission();
+      await vi.waitFor(() => expect(push.getPushStatus().state).toBe("error"));
+      await push.retryPushRegistration();
+      await vi.waitFor(() => expect(push.getPushStatus()).toEqual({ state: "registered" }));
+      expect(plugin.register).toHaveBeenCalledTimes(2);
+      expect(api.registerPushToken).toHaveBeenCalledTimes(2);
+    });
+
+    it("Try again while permission can still be asked shows Android's prompt", async () => {
+      const push = await freshPush();
+      plugin.requestPermissions.mockImplementationOnce(async () => ({ receive: "granted" }));
+      await push.retryPushRegistration();
+      expect(plugin.requestPermissions).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(push.getPushStatus()).toEqual({ state: "registered" }));
+    });
+
+    it("Try again when denied never prompts; stays denied", async () => {
+      plugin.permission = "denied";
+      const push = await freshPush();
+      expect(await push.retryPushRegistration()).toEqual({ state: "denied" });
+      expect(plugin.requestPermissions).not.toHaveBeenCalled();
+    });
+
+    it("subscribers hear every change; sign-out resets to not registered and warns on failure", async () => {
+      plugin.permission = "granted";
+      const push = await freshPush();
+      const seen: string[] = [];
+      push.subscribePushStatus((s) => seen.push(s.state));
+      await push.requestPushPermission();
+      await vi.waitFor(() => expect(seen).toContain("registered"));
+      api.removePushToken.mockRejectedValueOnce(new FakeApiError("x", 0));
+      await push.stopPush();
+      expect(push.getPushStatus()).toEqual({ state: "not-registered" });
+      expect(warned()).toContain("removing the device failed - can't reach the server");
+      expect(seen).toEqual(["registering", "registered", "not-registered"]);
+    });
   });
 
   it("the explanation is shown only once", async () => {

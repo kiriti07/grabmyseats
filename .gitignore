@@ -44,3 +44,6 @@ yarn-error.log*
 *firebase-adminsdk*.json
 *service-account*.json
 fcm-sender*.json
+
+# local one-off: installs the push key on the server (never commit)
+scripts/install-fcm-key.sh

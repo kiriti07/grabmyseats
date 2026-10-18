@@ -34,6 +34,7 @@ export function NotificationPrompt() {
       const result = await requestPushPermission();
       setState(result === "granted" ? "granted" : result === "unsupported" ? "hidden" : "denied");
     } catch {
+      // Already logged by lib/push.ts, and shown in the My Alerts status line.
       setState("denied");
     }
   }

@@ -32,10 +32,49 @@ const HOUR_MS = 60 * 60 * 1000;
 const NAME_MAX = 40;
 
 export interface MatchAlertsResult {
+  // What the run looked at: usable alerts, and live listings still ahead.
+  activeAlerts: number;
+  candidateListings: number;
   matched: number;
   pushed: number;
   inAppOnly: number;
   skipped: number;
+  // Why matches weren't pushed this run, in matches (push-off and no-device
+  // add up to inAppOnly; noLongerValid is skipped).
+  reasons: {
+    pushOff: number;
+    noDevice: number;
+    rateLimited: number;
+    claimLost: number;
+    noLongerValid: number;
+    sendFailed: number;
+    unconfirmed: number;
+    retrying: number;
+  };
+}
+
+// The job's log line (jobs/index.ts): counts only - no ids, names or tokens.
+export function formatMatchAlertsLog(r: MatchAlertsResult): string {
+  const reasons = [
+    `push-off=${r.reasons.pushOff}`,
+    `no-device=${r.reasons.noDevice}`,
+    `rate-limited=${r.reasons.rateLimited}`,
+    `claim-lost=${r.reasons.claimLost}`,
+    `no-longer-valid=${r.reasons.noLongerValid}`,
+    `send-failed=${r.reasons.sendFailed}`,
+    `unconfirmed=${r.reasons.unconfirmed}`,
+    `retrying=${r.reasons.retrying}`,
+  ].join(", ");
+  return (
+    `[jobs] ticket alerts: checked ${r.activeAlerts} active alerts, ${r.candidateListings} candidate listings, ` +
+    `${r.matched} new matches, ${r.pushed} pushes, ${r.inAppOnly} in-app only, ${r.skipped} skipped ` +
+    `(reasons: ${reasons})`
+  );
+}
+
+// Whether a run did anything worth a log line on its own.
+export function matchAlertsFoundSomething(r: MatchAlertsResult): boolean {
+  return r.matched + r.pushed + r.inAppOnly + r.skipped + Object.values(r.reasons).reduce((a, b) => a + b, 0) > 0;
 }
 
 interface PendingRow {
@@ -56,7 +95,28 @@ export async function matchAlerts(
 ): Promise<MatchAlertsResult> {
   const now = options.now ?? new Date();
   const sender = options.sender !== undefined ? options.sender : getPushSender();
-  const result: MatchAlertsResult = { matched: 0, pushed: 0, inAppOnly: 0, skipped: 0 };
+  const result: MatchAlertsResult = {
+    activeAlerts: 0,
+    candidateListings: 0,
+    matched: 0,
+    pushed: 0,
+    inAppOnly: 0,
+    skipped: 0,
+    reasons: {
+      pushOff: 0, noDevice: 0, rateLimited: 0, claimLost: 0,
+      noLongerValid: 0, sendFailed: 0, unconfirmed: 0, retrying: 0,
+    },
+  };
+
+  const userScope = options.userIds ? { userId: { in: options.userIds } } : {};
+
+  // For the log: roughly what matching (lib/alertMatching.ts) starts from.
+  result.activeAlerts = await prisma.ticketAlert.count({
+    where: { ...userScope, isActive: true, expiresAt: { gt: now } },
+  });
+  result.candidateListings = await prisma.listing.count({
+    where: { status: { in: ["ACTIVE", "PARTIALLY_SOLD"] }, showtime: { gt: showtimeClockNow(now.getTime()) } },
+  });
 
   // 1. Match.
   const matches = await findAlertMatches({ userIds: options.userIds }, now);
@@ -67,8 +127,6 @@ export async function matchAlerts(
     });
     result.matched = created.count;
   }
-
-  const userScope = options.userIds ? { userId: { in: options.userIds } } : {};
 
   // A push that never finished (crash, timeout) - it may have gone out, so
   // it's never sent again.
@@ -88,6 +146,7 @@ export async function matchAlerts(
       data: { status: "SKIPPED" },
     });
     result.skipped += dropped.count;
+    result.reasons.noLongerValid += dropped.count;
     if (rows.length === 0) {
       await finishDelivery(delivery.id, "FAILED", "SKIPPED", now);
       continue;
@@ -100,7 +159,9 @@ export async function matchAlerts(
   }
 
   // 2b. New matches, per user.
-  result.skipped += await skipInvalidPending(now, options.userIds);
+  const stillInvalid = await skipInvalidPending(now, options.userIds);
+  result.skipped += stillInvalid;
+  result.reasons.noLongerValid += stillInvalid;
   const pending = await validPendingRows(now, { userIds: options.userIds, unassigned: true });
   const byUser = new Map<string, PendingRow[]>();
   for (const row of pending) byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row]);
@@ -113,16 +174,24 @@ export async function matchAlerts(
         data: { status: "IN_APP_ONLY" },
       });
       result.inAppOnly += rows.length;
+      if (!sender) result.reasons.pushOff += rows.length;
+      else result.reasons.noDevice += rows.length;
       continue;
     }
 
     const recent = await prisma.pushDelivery.count({
       where: { userId, createdAt: { gt: new Date(now.getTime() - HOUR_MS) } },
     });
-    if (recent >= PUSHES_PER_USER_PER_HOUR) continue; // wait - combined into a later push
+    if (recent >= PUSHES_PER_USER_PER_HOUR) {
+      result.reasons.rateLimited += rows.length; // wait - combined into a later push
+      continue;
+    }
 
     const deliveryId = await claimRows(userId, rows, now);
-    if (!deliveryId) continue; // another run got there first
+    if (!deliveryId) {
+      result.reasons.claimLost += rows.length; // another run got there first
+      continue;
+    }
     await sendDelivery(sender, deliveryId, userId, rows, 1, now, result);
   }
 
@@ -165,6 +234,8 @@ async function sendDelivery(
   if (!sender || tokens.length === 0) {
     await finishDelivery(deliveryId, "FAILED", "IN_APP_ONLY", now);
     result.inAppOnly += rows.length;
+    if (!sender) result.reasons.pushOff += rows.length;
+    else result.reasons.noDevice += rows.length;
     return;
   }
 
@@ -179,14 +250,18 @@ async function sendDelivery(
     result.pushed += 1;
   } else if (kinds.has("unknown")) {
     await finishDelivery(deliveryId, "SENT_UNCONFIRMED", "SENT_UNCONFIRMED", now);
+    result.reasons.unconfirmed += rows.length;
   } else if (kinds.has("retryable") && attempt < MAX_ATTEMPTS) {
     await prisma.pushDelivery.update({ where: { id: deliveryId }, data: { status: "RETRY" } });
+    result.reasons.retrying += rows.length;
   } else if (invalid.length === outcomes.length) {
     // Every device is gone: in-app only.
     await finishDelivery(deliveryId, "FAILED", "IN_APP_ONLY", now);
     result.inAppOnly += rows.length;
+    result.reasons.noDevice += rows.length;
   } else {
     await finishDelivery(deliveryId, "FAILED", "FAILED", now);
+    result.reasons.sendFailed += rows.length;
   }
 }
 

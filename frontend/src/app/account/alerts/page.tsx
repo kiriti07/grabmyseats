@@ -19,6 +19,7 @@ import { ErrorText } from "@/components/ui/ErrorText";
 import { AlertForm } from "@/components/alerts/AlertForm";
 import { AlertMatchList } from "@/components/alerts/AlertMatchList";
 import { NotificationPrompt } from "@/components/push/NotificationPrompt";
+import { PushStatusLine } from "@/components/push/PushStatusLine";
 
 const STATUS_LABEL: Record<TicketAlertStatus, string> = { active: "Active", paused: "Paused", expired: "Ended" };
 const STATUS_CLASS: Record<TicketAlertStatus, string> = {
@@ -112,6 +113,8 @@ export default function AlertsPage() {
 
       <div className="mt-6 w-full max-w-sm flex-1">
         <ErrorText>{error}</ErrorText>
+
+        <PushStatusLine />
 
         {justSaved && (
           <div className="mb-4 rounded-lg border border-line bg-surface p-4">

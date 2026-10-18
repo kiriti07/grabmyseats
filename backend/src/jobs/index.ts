@@ -3,9 +3,15 @@ import { expireReservations } from "./expireReservations";
 import { expireListings } from "./expireListings";
 import { autoConfirmStaleEscrows } from "./autoConfirmStaleEscrows";
 import { releasePayouts } from "./releasePayouts";
-import { matchAlerts } from "./matchAlerts";
+import { formatMatchAlertsLog, matchAlerts, matchAlertsFoundSomething } from "./matchAlerts";
 import { purgeDeletedAccountRecords } from "./purgeDeletedAccountRecords";
 import { PAYMENT_MODE } from "../lib/config";
+
+// Ticket-alert job log: "every-run" logs each 5-minute run (while push
+// delivery is being checked); "changes" logs only runs that found something,
+// plus one line an hour so silence still means the job is running.
+const ALERT_JOB_LOG: "every-run" | "changes" = "every-run";
+const ALERT_JOB_HEARTBEAT_MS = 60 * 60 * 1000;
 
 export function startJobs(): void {
   schedule(
@@ -69,16 +75,20 @@ export function startJobs(): void {
     );
   }
 
+  let alertsLastLoggedAt = 0;
   schedule(
     "*/5 * * * *",
     async () => {
       try {
-        const { matched, pushed, inAppOnly, skipped } = await matchAlerts();
-        if (matched + pushed + inAppOnly + skipped > 0) {
-          console.log(
-            `[jobs] ticket alerts: ${matched} new match(es), ${pushed} push(es), ` +
-              `${inAppOnly} in-app only, ${skipped} skipped`,
-          );
+        const result = await matchAlerts();
+        const now = Date.now();
+        if (
+          ALERT_JOB_LOG === "every-run" ||
+          matchAlertsFoundSomething(result) ||
+          now - alertsLastLoggedAt >= ALERT_JOB_HEARTBEAT_MS
+        ) {
+          console.log(formatMatchAlertsLog(result));
+          alertsLastLoggedAt = now;
         }
       } catch (err) {
         console.error("[jobs] matchAlerts failed", err);
