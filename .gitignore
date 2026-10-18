@@ -47,3 +47,6 @@ fcm-sender*.json
 
 # local one-off: installs the push key on the server (never commit)
 scripts/install-fcm-key.sh
+
+# Android release build output (APK/AAB metadata, baseline profiles)
+frontend/android/app/release/
