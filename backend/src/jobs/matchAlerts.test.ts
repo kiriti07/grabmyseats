@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "../lib/prisma";
 import { FakePushSender } from "../test/fakePushSender";
-import { buildMessage, cleanEventName, matchAlerts, MAX_ATTEMPTS, PUSHES_PER_USER_PER_HOUR } from "./matchAlerts";
+import { buildMessage, cleanEventName, formatMatchAlertsLog, matchAlerts, MAX_ATTEMPTS, PUSHES_PER_USER_PER_HOUR } from "./matchAlerts";
 
 // jobs/matchAlerts.ts end to end against the throwaway Postgres, with a fake
 // push sender (no FCM, no real tokens). Every scenario gets its own buyer and
@@ -336,6 +336,84 @@ describe("ticket alert job", () => {
     await listing(seller.id, { movieName: N("Kalki"), showtime: new Date(`${day(6)}T19:30:00.000Z`) });
     expect(await run(buyer.id, push)).toMatchObject({ matched: 0, pushed: 0 });
     expect(push.messagesTo(device)).toHaveLength(0);
+  });
+
+  describe("instant path (one listing, right after it's saved)", () => {
+    const instant = (listingId: string, buyerId: string, push: FakePushSender | null) =>
+      matchAlerts({ listingIds: [listingId], userIds: [buyerId], sender: push });
+
+    it("creates exactly one notification and one push; the sweep afterwards adds nothing", async () => {
+      const { seller, buyer, device, push } = await scene();
+      const a = await alert(buyer.id);
+      const l = await listing(seller.id);
+
+      expect(await instant(l.id, buyer.id, push)).toMatchObject({ candidateListings: 1, matched: 1, pushed: 1 });
+      expect(await run(buyer.id, push)).toMatchObject({ matched: 0, pushed: 0 });
+      expect(await rows(a.id)).toHaveLength(1);
+      expect((await rows(a.id))[0].status).toBe("SENT");
+      expect(push.messagesTo(device)).toHaveLength(1);
+    });
+
+    it("instant and sweep at the same moment: still one notification, one push", async () => {
+      const { seller, buyer, device, push } = await scene();
+      const a = await alert(buyer.id);
+      const l = await listing(seller.id);
+
+      const results = await Promise.all([instant(l.id, buyer.id, push), run(buyer.id, push), instant(l.id, buyer.id, push)]);
+      expect(results.reduce((n, r) => n + r.matched, 0)).toBe(1);
+      expect(results.reduce((n, r) => n + r.pushed, 0)).toBe(1);
+      expect(await rows(a.id)).toHaveLength(1);
+      expect(push.messagesTo(device)).toHaveLength(1);
+    });
+
+    it("the sweep first, then the instant path: nothing twice", async () => {
+      const { seller, buyer, device, push } = await scene();
+      const a = await alert(buyer.id);
+      const l = await listing(seller.id);
+      expect(await run(buyer.id, push)).toMatchObject({ matched: 1, pushed: 1 });
+      expect(await instant(l.id, buyer.id, push)).toMatchObject({ matched: 0, pushed: 0 });
+      expect(await rows(a.id)).toHaveLength(1);
+      expect(push.messagesTo(device)).toHaveLength(1);
+    });
+
+    it("same rules: never the seller's own listing, nor a suspended buyer", async () => {
+      const { seller, buyer, device, push } = await scene();
+      await alert(buyer.id);
+      const own = await listing(buyer.id);
+      expect(await instant(own.id, buyer.id, push)).toMatchObject({ matched: 0, pushed: 0 });
+
+      await prisma.user.update({ where: { id: buyer.id }, data: { suspendedAt: new Date() } });
+      const other = await listing(seller.id);
+      expect(await instant(other.id, buyer.id, push)).toMatchObject({ matched: 0, pushed: 0 });
+      expect(push.messagesTo(device)).toHaveLength(0);
+    });
+
+    it("same hourly cap: over it, the match waits for a later combined push", async () => {
+      const { seller, buyer, device, push } = await scene();
+      await alert(buyer.id);
+      for (let i = 0; i < PUSHES_PER_USER_PER_HOUR; i++) {
+        await prisma.pushDelivery.create({ data: { userId: buyer.id, status: "SENT", attempts: 1, matchCount: 1, sentAt: new Date() } });
+      }
+      const l = await listing(seller.id);
+      const result = await instant(l.id, buyer.id, push);
+      expect(result).toMatchObject({ matched: 1, pushed: 0 });
+      expect(result.reasons.rateLimited).toBe(1);
+      expect(push.messagesTo(device)).toHaveLength(0);
+    });
+
+    it("a listing matching nothing touches no one's pending matches", async () => {
+      const { seller, buyer, push } = await scene();
+      await alert(buyer.id);
+      const unrelated = await listing(seller.id, { movieName: N("Leo") });
+      expect(await instant(unrelated.id, buyer.id, push)).toMatchObject({ matched: 0, pushed: 0, inAppOnly: 0, skipped: 0 });
+    });
+
+    it("logs which path ran", async () => {
+      const { buyer, push } = await scene();
+      const result = await run(buyer.id, push);
+      expect(formatMatchAlertsLog(result, "instant")).toMatch(/^\[jobs\] ticket alerts \(instant\): checked /);
+      expect(formatMatchAlertsLog(result, "sweep")).toMatch(/^\[jobs\] ticket alerts \(sweep\): checked /);
+    });
   });
 
   describe("message text", () => {

@@ -48,6 +48,7 @@ import { requireAuth } from "../middleware/auth";
 import { requireVerifiedIdentity } from "../lib/verificationGate";
 import { isActiveReviewAccount } from "../lib/reviewAccess";
 import { uploadScreenshot } from "../middleware/upload";
+import { matchListingInBackground } from "../jobs/matchAlerts";
 
 const ALL_DELIVERY_METHODS: DeliveryMethod[] = ["IN_PERSON", "EMAIL_FORWARD"];
 const ALL_CATEGORIES: Category[] = ["MOVIE", "EVENT", "SPORT"];
@@ -388,6 +389,10 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
   if (req.user!.referredByUserId) {
     await checkAndAwardReferralMilestone(req.user!.referredByUserId);
   }
+
+  // Ticket alerts for this listing, once the response has gone out (the
+  // 5-minute sweep is the safety net) - never part of the seller's request.
+  matchListingInBackground(res, listing.id);
 
   const body: ApiResponse<{ listing: SharedListing }> = {
     success: true,
@@ -1251,6 +1256,10 @@ listingsRouter.patch("/:id", requireAuth, async (req, res) => {
 
       return tx.listing.update({ where: { id: listingId }, data });
     });
+
+    // A new date/time or seat count can match alerts it didn't before (the
+    // price can't - it isn't part of matching).
+    if (showtimeProvided || totalSeatsProvided) matchListingInBackground(res, listing.id);
 
     const body: ApiResponse<{ listing: SharedListing }> = {
       success: true,

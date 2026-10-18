@@ -11,6 +11,7 @@ import { storageProvider } from "../lib/storage";
 import { NO_TICKET_CODE_MESSAGE } from "../lib/ticketBarcode";
 import { ticketFingerprint } from "../lib/ticketFingerprint";
 import { ticketImage, uniqueTicketPayload } from "../test/ticketImage";
+import { alertMatchingIdle } from "../jobs/matchAlerts";
 
 // The barcode requirement and duplicate-ticket rule on POST /api/listings
 // and POST /api/listings/ocr. Payloads are unique per test (uniqueTicketPayload)
@@ -179,6 +180,9 @@ describe("ticket barcode requirement", () => {
     it("the database index is the backstop when the pre-check is bypassed", async () => {
       const payload = uniqueTicketPayload();
       expect((await listTicket(sellerA.token, await ticketImage(payload))).status).toBe(201);
+      // The first listing's background alert matching queries too - let it
+      // finish so the mock below only answers the duplicate pre-check.
+      await alertMatchingIdle();
       // Pretend the pre-check found nothing (as when racing another request).
       const preCheck = vi.spyOn(prisma, "$queryRaw").mockResolvedValueOnce([] as never);
       const res = await listTicket(sellerB.token, await ticketImage(payload));

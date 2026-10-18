@@ -4,8 +4,14 @@ import { prisma } from "../lib/prisma";
 import { findAlertMatches } from "../lib/alertMatching";
 import { getPushSender, type PushMessage, type PushSender } from "../lib/push";
 
-// Ticket-alert notifications, every 5 minutes (jobs/index.ts) - never inside
-// the request that publishes a listing.
+// Ticket-alert notifications. Two ways in, one code path:
+// - the sweep, every 5 minutes (jobs/index.ts): every live listing;
+// - instant: right after a listing is created or edited (routes/
+//   listings.ts), that one listing, in the background once the response
+//   has gone - never inside the seller's request (matchListingInBackground).
+// Both run through matchAlerts() below, one run at a time in this process,
+// with the same rules, cap and claim, so whichever finds a match first
+// sends it and the other finds nothing new.
 //
 // 1. Match: every live listing against every usable alert
 //    (lib/alertMatching.ts). Each new (alert, listing) pair gets one
@@ -53,8 +59,10 @@ export interface MatchAlertsResult {
   };
 }
 
+export type MatchAlertsSource = "sweep" | "instant";
+
 // The job's log line (jobs/index.ts): counts only - no ids, names or tokens.
-export function formatMatchAlertsLog(r: MatchAlertsResult): string {
+export function formatMatchAlertsLog(r: MatchAlertsResult, source: MatchAlertsSource): string {
   const reasons = [
     `push-off=${r.reasons.pushOff}`,
     `no-device=${r.reasons.noDevice}`,
@@ -66,7 +74,7 @@ export function formatMatchAlertsLog(r: MatchAlertsResult): string {
     `retrying=${r.reasons.retrying}`,
   ].join(", ");
   return (
-    `[jobs] ticket alerts: checked ${r.activeAlerts} active alerts, ${r.candidateListings} candidate listings, ` +
+    `[jobs] ticket alerts (${source}): checked ${r.activeAlerts} active alerts, ${r.candidateListings} candidate listings, ` +
     `${r.matched} new matches, ${r.pushed} pushes, ${r.inAppOnly} in-app only, ${r.skipped} skipped ` +
     `(reasons: ${reasons})`
   );
@@ -88,11 +96,74 @@ interface PendingRow {
   alertHasPoint: boolean;
 }
 
-// Optional scoping by user, so tests sharing one database only ever touch
-// their own rows - the scheduled run always does everyone.
-export async function matchAlerts(
-  options: { now?: Date; userIds?: string[]; sender?: PushSender | null } = {},
-): Promise<MatchAlertsResult> {
+export interface MatchAlertsOptions {
+  now?: Date;
+  // Optional scoping by user, so tests sharing one database only ever touch
+  // their own rows - the scheduled run always does everyone.
+  userIds?: string[];
+  // Instant path: match only these listings, then send only to the users
+  // they matched.
+  listingIds?: string[];
+  sender?: PushSender | null;
+}
+
+// One run at a time in this process: the hourly-cap check and the claim
+// then never interleave between the instant path and the sweep.
+let runQueue: Promise<unknown> = Promise.resolve();
+
+export function matchAlerts(options: MatchAlertsOptions = {}): Promise<MatchAlertsResult> {
+  const run = runQueue.then(() => runMatchAlerts(options));
+  runQueue = run.catch(() => {});
+  return run;
+}
+
+// Instant runs whose response hasn't closed yet, or that are still running.
+const instantInFlight = new Set<Promise<void>>();
+
+// Resolves once every instant run scheduled so far, and every run queued,
+// has finished (tests).
+export async function alertMatchingIdle(): Promise<void> {
+  await Promise.all(Array.from(instantInFlight));
+  await runQueue;
+}
+
+const defaultInstantRunner = (listingId: string) => matchAlerts({ listingIds: [listingId] });
+let instantRunner: (listingId: string) => Promise<MatchAlertsResult> = defaultInstantRunner;
+
+// Tests only: make the instant path fail; null restores it.
+export function setInstantMatchRunner(next: ((listingId: string) => Promise<MatchAlertsResult>) | null): void {
+  instantRunner = next ?? defaultInstantRunner;
+}
+
+// Matches one listing once the seller's response has gone out (its
+// "close" event). Never throws and never rejects: a failure is logged
+// (name and code only) and the 5-minute sweep picks the listing up anyway.
+export function matchListingInBackground(res: { once(event: "close", fn: () => void): unknown }, listingId: string): void {
+  let done = () => {};
+  const tracked = new Promise<void>((resolve) => (done = resolve));
+  instantInFlight.add(tracked);
+  void tracked.then(() => instantInFlight.delete(tracked));
+  res.once("close", () => {
+    setImmediate(() => {
+      let run: Promise<MatchAlertsResult>;
+      try {
+        run = instantRunner(listingId);
+      } catch (err) {
+        run = Promise.reject(err);
+      }
+      run
+        .then((result) => console.log(formatMatchAlertsLog(result, "instant")))
+        .catch((err) => {
+          const name = err instanceof Error ? err.name : "Error";
+          const code = typeof (err as { code?: unknown })?.code === "string" ? ` ${(err as { code: string }).code}` : "";
+          console.error(`[jobs] ticket alerts (instant) failed: ${name}${code}`);
+        })
+        .finally(done);
+    });
+  });
+}
+
+async function runMatchAlerts(options: MatchAlertsOptions): Promise<MatchAlertsResult> {
   const now = options.now ?? new Date();
   const sender = options.sender !== undefined ? options.sender : getPushSender();
   const result: MatchAlertsResult = {
@@ -108,18 +179,21 @@ export async function matchAlerts(
     },
   };
 
-  const userScope = options.userIds ? { userId: { in: options.userIds } } : {};
-
   // For the log: roughly what matching (lib/alertMatching.ts) starts from.
   result.activeAlerts = await prisma.ticketAlert.count({
-    where: { ...userScope, isActive: true, expiresAt: { gt: now } },
+    where: { ...(options.userIds ? { userId: { in: options.userIds } } : {}), isActive: true, expiresAt: { gt: now } },
   });
   result.candidateListings = await prisma.listing.count({
-    where: { status: { in: ["ACTIVE", "PARTIALLY_SOLD"] }, showtime: { gt: showtimeClockNow(now.getTime()) } },
+    where: {
+      ...(options.listingIds ? { id: { in: options.listingIds } } : {}),
+      status: { in: ["ACTIVE", "PARTIALLY_SOLD"] },
+      showtime: { gt: showtimeClockNow(now.getTime()) },
+    },
   });
 
-  // 1. Match.
-  const matches = await findAlertMatches({ userIds: options.userIds }, now);
+  // 1. Match. The row is unique per (alert, listing): when the sweep and
+  // the instant path find the same pair, only one insert counts.
+  const matches = await findAlertMatches({ userIds: options.userIds, listingIds: options.listingIds }, now);
   if (matches.length > 0) {
     const created = await prisma.alertNotification.createMany({
       data: matches.map((m) => ({ alertId: m.alertId, listingId: m.listingId, status: "PENDING" as const, notifiedAt: now })),
@@ -127,6 +201,16 @@ export async function matchAlerts(
     });
     result.matched = created.count;
   }
+
+  // Instant path: send only to the users this listing matched (the sweep
+  // looks after everyone else).
+  let userIds = options.userIds;
+  if (options.listingIds) {
+    const matchedUsers = new Set(matches.map((m) => m.userId));
+    userIds = (options.userIds ?? Array.from(matchedUsers)).filter((u) => matchedUsers.has(u));
+    if (userIds.length === 0) return result;
+  }
+  const userScope = userIds ? { userId: { in: userIds } } : {};
 
   // A push that never finished (crash, timeout) - it may have gone out, so
   // it's never sent again.
@@ -159,10 +243,10 @@ export async function matchAlerts(
   }
 
   // 2b. New matches, per user.
-  const stillInvalid = await skipInvalidPending(now, options.userIds);
+  const stillInvalid = await skipInvalidPending(now, userIds);
   result.skipped += stillInvalid;
   result.reasons.noLongerValid += stillInvalid;
-  const pending = await validPendingRows(now, { userIds: options.userIds, unassigned: true });
+  const pending = await validPendingRows(now, { userIds, unassigned: true });
   const byUser = new Map<string, PendingRow[]>();
   for (const row of pending) byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row]);
 

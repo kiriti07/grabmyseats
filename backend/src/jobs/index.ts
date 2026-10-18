@@ -87,11 +87,11 @@ export function startJobs(): void {
           matchAlertsFoundSomething(result) ||
           now - alertsLastLoggedAt >= ALERT_JOB_HEARTBEAT_MS
         ) {
-          console.log(formatMatchAlertsLog(result));
+          console.log(formatMatchAlertsLog(result, "sweep"));
           alertsLastLoggedAt = now;
         }
       } catch (err) {
-        console.error("[jobs] matchAlerts failed", err);
+        console.error("[jobs] ticket alerts (sweep) failed", err);
       }
     },
     { name: "match-alerts", noOverlap: true },
