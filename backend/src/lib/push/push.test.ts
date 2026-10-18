@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // firebase-admin's messaging is replaced, so nothing here ever reaches FCM.
 const sendEach = vi.fn();
@@ -11,7 +11,7 @@ vi.mock("firebase-admin/messaging", () => ({ getMessaging: () => ({ sendEach }) 
 
 import { checkPushConfigAtStartup, getPushSender, setPushSender } from "./index";
 import { loadServiceAccount, PushConfigError } from "./config";
-import { FcmPushSender } from "./FcmPushSender";
+import { FcmPushSender, sanitizeFcmMessage } from "./FcmPushSender";
 
 // A throwaway key generated here - a stand-in with the right shape, not a
 // real service account.
@@ -93,7 +93,25 @@ describe("push settings", () => {
     env({ PUSH_NOTIFICATIONS_ENABLED: "true", NODE_ENV: "production" });
     expect(() => checkPushConfigAtStartup()).toThrow(/PUSH_NOTIFICATIONS_ENABLED=true but/);
     env({ PUSH_NOTIFICATIONS_ENABLED: "true", NODE_ENV: "production", FIREBASE_SERVICE_ACCOUNT_BASE64: b64(FAKE_ACCOUNT) });
+    vi.spyOn(console, "log").mockImplementation(() => {});
     expect(checkPushConfigAtStartup()).toBe("enabled");
+  });
+
+  it("enabled: logs the key's project id - and nothing else from the key", () => {
+    env({ PUSH_NOTIFICATIONS_ENABLED: "true", FIREBASE_SERVICE_ACCOUNT_BASE64: b64(FAKE_ACCOUNT) });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    expect(checkPushConfigAtStartup()).toBe("enabled");
+    const out = log.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(out).toBe("[config] PUSH project=test-project");
+    expect(out).not.toContain(FAKE_ACCOUNT.client_email);
+    expect(out).not.toContain("PRIVATE KEY");
+  });
+
+  it("disabled: no project line", () => {
+    env({});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    expect(checkPushConfigAtStartup()).toBe("disabled");
+    expect(log).not.toHaveBeenCalled();
   });
 
   it("the server itself refuses to boot in production with push on and a bad key - without printing the key", () => {
@@ -126,7 +144,17 @@ describe("FCM sender", () => {
     privateKey: FAKE_ACCOUNT.private_key,
   });
   const message = { title: "Tickets available", body: "Jailer, 20 Oct - 4 seats near you", path: "/buy/abc" };
-  afterEach(() => sendEach.mockReset());
+  let errorLog: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    sendEach.mockReset();
+    errorLog.mockRestore();
+  });
+  const logged = () => errorLog.mock.calls.map((c) => String(c[0]));
+  // Shaped like a real FCM token - must never appear in a log line.
+  const TOKEN = "dQw4w9WgXcQ:APA91bH" + "x".repeat(140);
 
   it("sends one Android message per device with the alerts channel, tag and tap path", async () => {
     sendEach.mockResolvedValue({ responses: [{ success: true }, { success: true }] });
@@ -160,5 +188,51 @@ describe("FCM sender", () => {
     sendEach.mockRejectedValue(new Error("socket hang up"));
     const result = await sender.send(["a", "b"], message);
     expect(result.map((r) => r.outcome)).toEqual(["unknown", "unknown"]);
+  });
+
+  it("a failed send logs one line per code: code, status, device count, cleaned message - never the token", async () => {
+    sendEach.mockResolvedValue({
+      responses: [
+        { success: true },
+        { success: false, error: { code: "messaging/mismatched-credential", message: "SenderId mismatch" } },
+        { success: false, error: { code: "messaging/mismatched-credential", message: "SenderId mismatch" } },
+      ],
+    });
+    await sender.send(["ok", TOKEN, TOKEN], message);
+    expect(logged()).toEqual(["[push] send failed: code=messaging/mismatched-credential, status=n/a, devices=2 - SenderId mismatch"]);
+    expect(logged().join()).not.toContain("dQw4w9WgXcQ");
+    expect(logged().join()).not.toContain(message.body);
+  });
+
+  it("takes the HTTP status from a non-JSON answer's message", async () => {
+    sendEach.mockResolvedValue({
+      responses: [{
+        success: false,
+        error: { code: "messaging/authentication-error", message: 'Auth error. Raw server response: "<html>denied</html>". Status code: 403.' },
+      }],
+    });
+    await sender.send([TOKEN], message);
+    expect(logged()[0]).toMatch(/^\[push\] send failed: code=messaging\/authentication-error, status=403, devices=1 - /);
+  });
+
+  it("no answer at all is logged too, as not retried", async () => {
+    sendEach.mockRejectedValue(Object.assign(new Error("Credential implementation provided failed to fetch a valid access token"), { code: "app/invalid-credential" }));
+    await sender.send([TOKEN, TOKEN], message);
+    expect(logged()).toEqual([
+      "[push] send failed: code=app/invalid-credential, status=n/a, devices=2 (no per-device answer, not retried) - Credential implementation provided failed to fetch a valid access token",
+    ]);
+  });
+
+  it("successful sends log nothing", async () => {
+    sendEach.mockResolvedValue({ responses: [{ success: true }] });
+    await sender.send([TOKEN], message);
+    expect(errorLog).not.toHaveBeenCalled();
+  });
+
+  it("cleans FCM messages of keys, tokens, emails and long numbers", () => {
+    expect(sanitizeFcmMessage(`bad ${TOKEN} for fcm-sender@p.iam.gserviceaccount.com +91 98765 43210 -----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----`))
+      .toBe("bad <redacted> for <email> <number> <key>");
+    expect(sanitizeFcmMessage("x".repeat(30).split("").join(" ").repeat(10)).length).toBeLessThanOrEqual(160);
+    expect(sanitizeFcmMessage(undefined)).toBe("");
   });
 });

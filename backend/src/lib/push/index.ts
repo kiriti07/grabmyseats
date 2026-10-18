@@ -35,7 +35,10 @@ export function setPushSender(next: PushSender | null | undefined): void {
 export function checkPushConfigAtStartup(): "enabled" | "disabled" {
   if (!isPushRequested()) return "disabled";
   try {
-    loadServiceAccount();
+    // The key's project, to compare with project_id in the app's
+    // google-services.json - a project id isn't secret; nothing else is logged.
+    const { projectId } = loadServiceAccount();
+    console.log(`[config] PUSH project=${projectId.replace(/[^a-z0-9-]/gi, "?")}`);
     return "enabled";
   } catch (err) {
     if (!(err instanceof PushConfigError)) throw err;
