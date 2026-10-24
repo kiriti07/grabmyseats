@@ -44,11 +44,20 @@ export type IdentifierChannel = "email" | "phone";
 // GET /api/auth/options - what the sign-in/sign-up and verification screens
 // may offer. phoneOtpAvailable is false in production until a real SMS
 // provider is configured (codes would never arrive); smsCountryCodes are
-// the calling codes (no "+") phone codes may be sent to.
+// the calling codes (no "+") phone codes may be sent to. requireReferral:
+// sign-up is invite-only (REQUIRE_REFERRAL_FOR_SIGNUP) - a new account needs
+// a valid invite code; signing in to an existing one never does.
 export interface AuthOptions {
   phoneOtpAvailable: boolean;
   requirePhoneVerification: boolean;
   smsCountryCodes: string[];
+  requireReferral: boolean;
+}
+
+// POST /api/auth/referral/check - whether an invite code would currently be
+// accepted at sign-up. Never says whose code it is.
+export interface ReferralCheckResult {
+  valid: boolean;
 }
 
 // POST /api/auth/otp/verify (and POST /api/auth/signup/confirm, which only

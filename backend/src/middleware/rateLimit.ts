@@ -141,6 +141,38 @@ export const otpIpLimiter = rateLimit({
   },
 });
 
+// Invite codes are short enough to guess, so every endpoint that answers
+// "is this code valid?" is capped per IP: POST /api/auth/referral/check
+// (the signup screen's early check) and POST /api/auth/signup/confirm
+// (which checks the code again before creating the account). Generous
+// enough for someone fixing a few typos. The per-IP limit on
+// /otp/request (otpIpLimiter) already covers the code sent along there.
+function sendReferralRateLimited(_req: Request, res: Response): void {
+  const body: ApiResponse<never> = {
+    success: false,
+    error: "Too many attempts. Please try again later.",
+  };
+  res.status(429).json(body);
+}
+
+export const referralCheckLimiter = rateLimit({
+  windowMs: HOUR,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new RedisStore({ sendCommand, prefix: "rl:referral-check:" }),
+  handler: sendReferralRateLimited,
+});
+
+export const signupConfirmLimiter = rateLimit({
+  windowMs: HOUR,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new RedisStore({ sendCommand, prefix: "rl:signup-confirm:" }),
+  handler: sendReferralRateLimited,
+});
+
 // Max 20 venue lookups (POST /api/listings/geocode) per user per 10
 // minutes. Each one can spend a shared, 1-request-per-second OpenStreetMap
 // Nominatim slot (lib/geocode.ts), so one account mustn't be able to drain

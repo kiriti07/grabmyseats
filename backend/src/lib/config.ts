@@ -50,3 +50,24 @@ export function smsAllowedCountryCodes(): string[] {
     .map((c) => c.trim().replace(/^\+/, ""))
     .filter((c) => /^\d{1,3}$/.test(c));
 }
+
+// When true, a new account can only be created with a valid referral
+// (invite) code - see resolveReferrer in lib/referral.ts and the signup
+// paths in routes/auth.ts. Existing accounts and the Play reviewer login
+// are never affected. Off unless set to exactly "true", so a missing or
+// typo'd var keeps signup open rather than locking everyone out. Read per
+// call (like requirePhoneVerification) so tests can toggle it; a running
+// server still only picks a change up on restart.
+export function requireReferralForSignup(): boolean {
+  return process.env.REQUIRE_REFERRAL_FOR_SIGNUP === "true";
+}
+
+// DEV_OTP_BYPASS_CODE would let anyone sign in as any email or phone. It is
+// already ignored at request time when NODE_ENV=production (routes/
+// auth.ts); this refuses to boot at all with it set, so a leftover value in
+// a production env file fails loud instead of lying dormant.
+export function checkDevOtpBypassAtStartup(): void {
+  if (process.env.NODE_ENV === "production" && process.env.DEV_OTP_BYPASS_CODE) {
+    throw new Error("DEV_OTP_BYPASS_CODE must not be set when NODE_ENV=production");
+  }
+}

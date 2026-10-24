@@ -33,6 +33,59 @@ export async function generateUniqueReferralCode(): Promise<string> {
   throw new Error("Could not generate a unique referral code");
 }
 
+// How a typed or pasted invite code is compared: surrounding whitespace,
+// inner spaces and dashes dropped (codes get read aloud and copied with
+// grouping), and uppercased - every stored code is uppercase, so this makes
+// matching case-insensitive. "" for anything that isn't a string.
+export function normalizeReferralCode(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.trim().toUpperCase().replace(/[\s-]/g, "");
+}
+
+// Codes made by generateUniqueReferralCode never contain 0/O or 1/I, but
+// accounts that predate it got 8-char hex codes from the migration backfill,
+// which do contain 0 and 1 - so a code typed with O for 0 or I/L for 1 is
+// also tried with those folded. An exact match always wins.
+function referralCodeCandidates(code: string): string[] {
+  const folded = code.replace(/O/g, "0").replace(/[IL]/g, "1");
+  return folded === code ? [code] : [code, folded];
+}
+
+const REFERRAL_CODE_INPUT_RE = /^[A-Z0-9]{4,16}$/;
+
+export type ReferralLookup =
+  | { status: "missing" }
+  | { status: "invalid" }
+  | { status: "valid"; referrerId: string };
+
+// The ?ref= / typed code at signup -> the referrer it credits. "invalid"
+// covers a code nobody has, and one whose owner is suspended, deleted, or
+// the Play reviewer account - none of those may bring anyone in. Whether a
+// "missing" or "invalid" code blocks signup is up to the caller (see
+// requireReferralForSignup in lib/config.ts).
+export async function resolveReferrer(raw: unknown): Promise<ReferralLookup> {
+  if (typeof raw === "string" && raw.length > 64) return { status: "invalid" };
+  const code = normalizeReferralCode(raw);
+  if (!code) return { status: "missing" };
+  if (!REFERRAL_CODE_INPUT_RE.test(code)) return { status: "invalid" };
+
+  const matches = await prisma.user.findMany({
+    where: { referralCode: { in: referralCodeCandidates(code) } },
+    select: {
+      id: true,
+      referralCode: true,
+      deletedAt: true,
+      suspendedAt: true,
+      isReviewAccount: true,
+    },
+  });
+  const referrer = matches.find((m) => m.referralCode === code) ?? matches[0];
+  if (!referrer || referrer.deletedAt || referrer.suspendedAt || referrer.isReviewAccount) {
+    return { status: "invalid" };
+  }
+  return { status: "valid", referrerId: referrer.id };
+}
+
 // A referral only "counts" once the referred user has completed at least
 // one real listing (as a seller) or reservation (as a buyer) - signup
 // alone is too easy to game (see POST /api/auth/otp/verify, which only

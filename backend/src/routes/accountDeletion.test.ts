@@ -461,7 +461,11 @@ describe("account deletion", () => {
         .send({ channel: "email", identifier: suspended.email, code: await issueOtp(loginOtpIdentifier("email", suspended.email!)), intent: "signin" });
       expect(signin.body.data.noAccount).toBe(true);
       const confirm = await trackSignup(
-        await request(app).post("/api/auth/signup/confirm").send({ signupToken: signin.body.data.signupToken }),
+        await request(app)
+          .post("/api/auth/signup/confirm")
+          // Own client IP: signup/confirm is rate-limited per IP (rateLimit.ts).
+          .set("X-Forwarded-For", `10.${Math.floor(Math.random() * 250) + 1}.${Math.floor(Math.random() * 250) + 1}.7`)
+          .send({ signupToken: signin.body.data.signupToken }),
       );
       expect(confirm.status).toBe(403);
     });

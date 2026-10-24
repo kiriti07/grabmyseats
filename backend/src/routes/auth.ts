@@ -3,6 +3,7 @@ import type {
   ApiResponse,
   AuthOptions,
   OtpVerifyResult,
+  ReferralCheckResult,
   User as SharedUser,
 } from "@grabmyseats/shared";
 import type { User } from "../generated/prisma/client";
@@ -20,10 +21,16 @@ import {
   otpIpLimiter,
   otpGlobalLimiter,
   otpVerifyLimiter,
+  referralCheckLimiter,
+  signupConfirmLimiter,
 } from "../middleware/rateLimit";
-import { generateUniqueReferralCode } from "../lib/referral";
+import { generateUniqueReferralCode, resolveReferrer } from "../lib/referral";
 import { parseIdentifierInput, PHONE_RE, type IdentifierInput } from "../lib/validators";
-import { requirePhoneVerification, smsAllowedCountryCodes } from "../lib/config";
+import {
+  requirePhoneVerification,
+  requireReferralForSignup,
+  smsAllowedCountryCodes,
+} from "../lib/config";
 import {
   clearUnverifiedClaims,
   findUserByVerifiedIdentifier,
@@ -34,6 +41,7 @@ import { isReviewLoginAttempt, loginReviewAccount } from "../lib/reviewAccess";
 import {
   consumePendingSignupToken,
   issuePendingSignupToken,
+  peekPendingSignupToken,
 } from "../lib/pendingSignupStore";
 import { findSuspendedIdentifierBlock, SuspendedIdentifierError } from "../lib/suspendedIdentifiers";
 
@@ -51,17 +59,21 @@ authRouter.get("/options", (_req, res) => {
       phoneOtpAvailable: phoneOtpAvailable(),
       requirePhoneVerification: requirePhoneVerification(),
       smsCountryCodes: smsAllowedCountryCodes(),
+      requireReferral: requireReferralForSignup(),
     },
   };
   res.json(body);
 });
 
 // Step 1 of both sign-in and sign-up, for either identifier: { channel:
-// "email" | "phone", identifier }. (A bare { email } - what clients sent
-// before phone OTP - still works.) The response is identical whether or not
-// an account exists for the identifier, so this can't be used to enumerate
-// accounts. Rate limits are layered per identifier, per IP and globally per
-// channel - see middleware/rateLimit.ts.
+// "email" | "phone", identifier, ref? }. (A bare { email } - what clients
+// sent before phone OTP - still works.) The response is identical whether
+// or not an account exists for the identifier, so this can't be used to
+// enumerate accounts. While sign-up is invite-only, a code is only actually
+// sent to an identifier that already has an account, or along with a valid
+// invite code (ref) - nobody else could use it, and every send costs us an
+// email or SMS. Rate limits are layered per identifier, per IP and globally
+// per channel - see middleware/rateLimit.ts.
 authRouter.post(
   "/otp/request",
   otpIdentifierLimiter,
@@ -77,43 +89,66 @@ authRouter.post(
       return;
     }
 
-    const code = await issueOtp(loginOtpIdentifier(input!.channel, input!.value));
-    sendOtp(input!, code, "auth");
+    if (await mayReceiveLoginCode(input!, req.body?.ref)) {
+      const code = await issueOtp(loginOtpIdentifier(input!.channel, input!.value));
+      sendOtp(input!, code, "auth");
+    }
 
     const body: ApiResponse<{ message: string }> = {
       success: true,
-      data: { message: "If that address or number can receive codes, one is on its way" },
+      data: {
+        message: requireReferralForSignup()
+          ? "If that address or number has an account, or you used a valid invite code, a code is on its way"
+          : "If that address or number can receive codes, one is on its way",
+      },
     };
     res.json(body);
   },
 );
 
-// Resolves silently (null) if the code is missing, malformed, or just
-// doesn't match anyone - a bad/stale referral link should never block
-// signup, it should just fail to credit anyone.
-async function findReferrerId(ref: unknown): Promise<string | null> {
-  const refCode = typeof ref === "string" ? ref.trim() : "";
-  if (!refCode) return null;
-  const referrer = await prisma.user.findUnique({
-    where: { referralCode: refCode },
-    select: { id: true, deletedAt: true },
-  });
-  // A deleted account's code was replaced at deletion, but never credit one.
-  return referrer && !referrer.deletedAt ? referrer.id : null;
+// Whether /otp/request actually sends a code - see the comment there. The
+// invite code is checked again when the account is created; this only
+// decides whether an email/SMS goes out.
+async function mayReceiveLoginCode(input: IdentifierInput, ref: unknown): Promise<boolean> {
+  if (!requireReferralForSignup()) return true;
+  if (await findUserByVerifiedIdentifier(input.channel, input.value)) return true;
+  return (await resolveReferrer(ref)).status === "valid";
+}
+
+const INVITE_REQUIRED_MESSAGE =
+  "GrabMySeats is invite-only right now. Enter the invite code a friend shared with you.";
+const INVITE_INVALID_MESSAGE =
+  "This invite link isn't valid anymore. Ask the person who invited you for their current code.";
+
+// The referrer a brand-new account will be linked to, or the refusal while
+// sign-up is invite-only. With the flag off, a missing or bad code just
+// credits nobody - what sign-up always did before invite-only existed.
+async function signupReferral(
+  ref: unknown,
+): Promise<{ referrerId: string | null } | { error: string }> {
+  const referral = await resolveReferrer(ref);
+  if (referral.status === "valid") return { referrerId: referral.referrerId };
+  if (!requireReferralForSignup()) return { referrerId: null };
+  return { error: referral.status === "missing" ? INVITE_REQUIRED_MESSAGE : INVITE_INVALID_MESSAGE };
+}
+
+function inviteRefused(res: Response, error: string): void {
+  const body: ApiResponse<never> = { success: false, error };
+  res.status(403).json(body);
 }
 
 // Creates an account for an identifier the caller has just proven they own
 // - verified from the start - clearing any other account's unverified
 // claim on it (the proven owner wins). If someone verified it in the
-// meantime, that account is returned instead, as a login. ?ref= is only
-// ever applied here, to a brand-new account - never backfilled onto an
-// existing one logging back in. Throws SuspendedIdentifierError for an
-// identifier of a deleted, suspended account (lib/accountDeletion.ts).
+// meantime, that account is returned instead, as a login. The referrer
+// (signupReferral above) is only ever applied here, to a brand-new account
+// - never backfilled onto an existing one logging back in. Throws
+// SuspendedIdentifierError for an identifier of a deleted, suspended
+// account (lib/accountDeletion.ts).
 async function createAccountForVerifiedIdentifier(
   input: IdentifierInput,
-  ref: unknown,
+  referredByUserId: string | null,
 ): Promise<{ user: User; isNewAccount: boolean }> {
-  const referredByUserId = await findReferrerId(ref);
   const referralCode = await generateUniqueReferralCode();
   const now = new Date();
 
@@ -197,11 +232,11 @@ async function completeLogin(
 async function createAccountOrRefuse(
   res: Response,
   input: IdentifierInput,
-  ref: unknown,
+  referredByUserId: string | null,
 ): Promise<void> {
   let result;
   try {
-    result = await createAccountForVerifiedIdentifier(input, ref);
+    result = await createAccountForVerifiedIdentifier(input, referredByUserId);
   } catch (err) {
     if (!(err instanceof SuspendedIdentifierError)) throw err;
     const body: ApiResponse<never> = { success: false, error: err.message };
@@ -221,11 +256,13 @@ function invalidCode(res: Response): void {
 // - an account that has it *verified* is logged into, whatever the intent
 //   (an account that merely lists it unverified never is - see
 //   lib/identity.ts);
-// - otherwise "signup" creates the account right away, while "signin"
+// - otherwise "signup" creates the account right away - while sign-up is
+//   invite-only, only with a valid ref (403 otherwise) - and "signin"
 //   creates nothing and answers { noAccount, signupToken } - the frontend
 //   then offers "create an account?", and POST /signup/confirm redeems the
-//   token. Telling the caller there's no account is fine at this point:
-//   they've just proven they own the identifier.
+//   token (checking the invite code again). Telling the caller there's no
+//   account is fine at this point: they've just proven they own the
+//   identifier.
 // intent defaults to "signup", which is what this endpoint always did
 // before sign-in and sign-up were split.
 authRouter.post("/otp/verify", otpVerifyLimiter, async (req: Request, res: Response) => {
@@ -293,25 +330,68 @@ authRouter.post("/otp/verify", otpVerifyLimiter, async (req: Request, res: Respo
     return;
   }
 
-  await createAccountOrRefuse(res, input, req.body?.ref);
+  const referral = await signupReferral(req.body?.ref);
+  if ("error" in referral) {
+    inviteRefused(res, referral.error);
+    return;
+  }
+  await createAccountOrRefuse(res, input, referral.referrerId);
 });
+
+function signupTokenExpired(res: Response): void {
+  const body: ApiResponse<never> = {
+    success: false,
+    error: "That sign-up link has expired - request a new code",
+  };
+  res.status(401).json(body);
+}
 
 // "Create an account?" after a sign-in found none - { signupToken, ref? }.
 // The token (single-use, 10 minutes - lib/pendingSignupStore.ts) stands in
 // for the code already redeemed at /otp/verify, so no second code is sent.
-authRouter.post("/signup/confirm", async (req, res) => {
+// The invite code is checked here in its own right - whatever /otp/request
+// or the screen before saw proves nothing - and before the token is spent,
+// so a mistyped code can be fixed and resubmitted. Rate-limited per IP
+// since it answers "is this invite code valid?".
+authRouter.post("/signup/confirm", signupConfirmLimiter, async (req, res) => {
   const token = typeof req.body?.signupToken === "string" ? req.body.signupToken : "";
-  const input = token ? await consumePendingSignupToken(token) : null;
+  const input = token ? await peekPendingSignupToken(token) : null;
   if (!input) {
-    const body: ApiResponse<never> = {
-      success: false,
-      error: "That sign-up link has expired - request a new code",
-    };
-    res.status(401).json(body);
+    signupTokenExpired(res);
     return;
   }
 
-  await createAccountOrRefuse(res, input, req.body?.ref);
+  // Someone verified the identifier since the token was issued: that's a
+  // login, which never needs (or applies) an invite code.
+  let referredByUserId: string | null = null;
+  if (!(await findUserByVerifiedIdentifier(input.channel, input.value))) {
+    const referral = await signupReferral(req.body?.ref);
+    if ("error" in referral) {
+      inviteRefused(res, referral.error);
+      return;
+    }
+    referredByUserId = referral.referrerId;
+  }
+
+  // GETDEL, so of two concurrent confirms only one gets past here.
+  if (!(await consumePendingSignupToken(token))) {
+    signupTokenExpired(res);
+    return;
+  }
+  await createAccountOrRefuse(res, input, referredByUserId);
+});
+
+// { code } - lets the sign-up screen tell someone their invite code is
+// wrong before a sign-in code is sent, instead of after. Only ever answers
+// valid or not, never whose code it is. Rate-limited per IP against
+// guessing codes.
+authRouter.post("/referral/check", referralCheckLimiter, async (req, res) => {
+  const referral = await resolveReferrer(req.body?.code);
+  const body: ApiResponse<ReferralCheckResult> = {
+    success: true,
+    data: { valid: referral.status === "valid" },
+  };
+  res.json(body);
 });
 
 // One-time onboarding step immediately after a brand-new signup (see

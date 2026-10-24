@@ -231,6 +231,7 @@ describe("OTP sign-in / sign-up (email or phone)", () => {
 
       const confirm = await request(app)
         .post("/api/auth/signup/confirm")
+        .set("X-Forwarded-For", clientIp)
         .send({ signupToken: res.body.data.signupToken });
       expect(confirm.status).toBe(200);
       expect(confirm.body.data.isNewAccount).toBe(true);
@@ -261,6 +262,7 @@ describe("OTP sign-in / sign-up (email or phone)", () => {
     it("a bogus or expired signupToken is refused", async () => {
       const res = await request(app)
         .post("/api/auth/signup/confirm")
+        .set("X-Forwarded-For", clientIp)
         .send({ signupToken: randomUUID() });
       expect(res.status).toBe(401);
     });
@@ -397,12 +399,17 @@ describe("OTP sign-in / sign-up (email or phone)", () => {
   it("GET /api/auth/options reports what the screens may offer", async () => {
     vi.stubEnv("REQUIRE_PHONE_VERIFICATION", "true");
     vi.stubEnv("SMS_ALLOWED_COUNTRY_CODES", "91");
+    vi.stubEnv("REQUIRE_REFERRAL_FOR_SIGNUP", "true");
     const res = await request(app).get("/api/auth/options");
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual({
       phoneOtpAvailable: true,
       requirePhoneVerification: true,
       smsCountryCodes: ["91"],
+      requireReferral: true,
     });
+
+    vi.stubEnv("REQUIRE_REFERRAL_FOR_SIGNUP", "");
+    expect((await request(app).get("/api/auth/options")).body.data.requireReferral).toBe(false);
   });
 });

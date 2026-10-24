@@ -241,6 +241,7 @@ describe("QA gap coverage", () => {
       "POST /api/auth/otp/request",
       "POST /api/auth/otp/verify",
       "POST /api/auth/signup/confirm",
+      "POST /api/auth/referral/check",
       "GET /api/listings/search",
       "GET /api/users/:id/rating-summary",
       "GET /api/users/me/email/verify",

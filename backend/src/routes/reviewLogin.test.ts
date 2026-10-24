@@ -302,6 +302,53 @@ describe("Play reviewer login (REVIEW_EMAIL / REVIEW_OTP)", () => {
     });
   });
 
+  // Here rather than in referralOnlySignup.test.ts: this suite owns the one
+  // review account, and the two would otherwise race on it in parallel.
+  describe("invite-only sign-up (REQUIRE_REFERRAL_FOR_SIGNUP)", () => {
+    it("the reviewer still gets in, with no invite code, first time and after", async () => {
+      vi.stubEnv("REQUIRE_REFERRAL_FOR_SIGNUP", "true");
+      enable();
+      const first = await verify({ channel: "email", identifier: REVIEW_EMAIL, code: REVIEW_OTP });
+      expect(first.status).toBe(200);
+      const again = await verify({
+        channel: "email",
+        identifier: REVIEW_EMAIL,
+        code: REVIEW_OTP,
+        intent: "signup",
+      });
+      expect(again.status).toBe(200);
+      expect(again.body.data.user.id).toBe(first.body.data.user.id);
+    });
+
+    it("the review account's own referral code can't bring anyone in", async () => {
+      vi.stubEnv("REQUIRE_REFERRAL_FOR_SIGNUP", "true");
+      enable();
+      const login = await verify({ channel: "email", identifier: REVIEW_EMAIL, code: REVIEW_OTP });
+      expect(login.status).toBe(200);
+      const reviewer = await prisma.user.findUniqueOrThrow({
+        where: { id: login.body.data.user.id },
+      });
+
+      const check = await request(app)
+        .post("/api/auth/referral/check")
+        .set("X-Forwarded-For", `10.77.${Math.floor(Math.random() * 250)}.9`)
+        .send({ code: reviewer.referralCode });
+      expect(check.body.data.valid).toBe(false);
+
+      const email = `invited-by-reviewer-${randomUUID()}@example.com`;
+      const code = await issueOtp(loginOtpIdentifier("email", email));
+      const res = await verify({
+        channel: "email",
+        identifier: email,
+        code,
+        intent: "signup",
+        ref: reviewer.referralCode,
+      });
+      expect(res.status).toBe(403);
+      expect(await prisma.user.count({ where: { email } })).toBe(0);
+    });
+  });
+
   describe("startup check", () => {
     it("refuses to boot on a guessable or malformed REVIEW_OTP, warns on a half-set pair", () => {
       enable(REVIEW_EMAIL, "000000");

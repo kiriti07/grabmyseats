@@ -4,7 +4,7 @@ import { startJobs } from "./jobs";
 import { PAYMENT_MODE } from "./lib/config";
 import { emailProviderName } from "./lib/email";
 import { smsProviderName } from "./lib/sms";
-import { requirePhoneVerification } from "./lib/config";
+import { checkDevOtpBypassAtStartup, requirePhoneVerification } from "./lib/config";
 import { checkReviewLoginConfigAtStartup } from "./lib/reviewAccess";
 import { isTicketFingerprintConfigured } from "./lib/ticketFingerprint";
 import { isIdentifierHashConfigured } from "./lib/identifierHash";
@@ -12,9 +12,7 @@ import { checkPushConfigAtStartup } from "./lib/push";
 
 // Fails loud instead of silently ignoring a leftover dev-only env var that
 // would otherwise let anyone sign in as any email address in production.
-if (process.env.NODE_ENV === "production" && process.env.DEV_OTP_BYPASS_CODE) {
-  throw new Error("DEV_OTP_BYPASS_CODE must not be set when NODE_ENV=production");
-}
+checkDevOtpBypassAtStartup();
 
 // PAYMENT_MODE is read once, at module load (see lib/config.ts), so a
 // process needs an actual restart to pick up an env var change - this

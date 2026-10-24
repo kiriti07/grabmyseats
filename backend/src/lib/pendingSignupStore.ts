@@ -24,3 +24,12 @@ export async function consumePendingSignupToken(token: string): Promise<Identifi
   if (stored === null) return null;
   return JSON.parse(stored) as IdentifierInput;
 }
+
+// Reads without spending it - POST /api/auth/signup/confirm checks the
+// invite code before consuming the token, so a mistyped code can be
+// corrected without requesting a new sign-in code.
+export async function peekPendingSignupToken(token: string): Promise<IdentifierInput | null> {
+  const stored = await redis.get(tokenKey(token));
+  if (stored === null) return null;
+  return JSON.parse(stored) as IdentifierInput;
+}

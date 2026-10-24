@@ -324,6 +324,8 @@ describe("referrals", () => {
 
       const confirm = await request(app)
         .post("/api/auth/signup/confirm")
+        // Own client IP: signup/confirm is rate-limited per IP (rateLimit.ts).
+        .set("X-Forwarded-For", `10.${Math.floor(Math.random() * 250) + 1}.${Math.floor(Math.random() * 250) + 1}.7`)
         .send({ signupToken: verify.body.data.signupToken, ref: "REFSIGNINCONFIRM" });
       expect(confirm.status).toBe(200);
       expect(confirm.body.data.isNewAccount).toBe(true);
@@ -342,6 +344,8 @@ describe("referrals", () => {
       // The token is single-use.
       const replay = await request(app)
         .post("/api/auth/signup/confirm")
+        // Own client IP: signup/confirm is rate-limited per IP (rateLimit.ts).
+        .set("X-Forwarded-For", `10.${Math.floor(Math.random() * 250) + 1}.${Math.floor(Math.random() * 250) + 1}.7`)
         .send({ signupToken: verify.body.data.signupToken });
       expect(replay.status).toBe(401);
     });
