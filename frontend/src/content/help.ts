@@ -28,6 +28,13 @@ No. We don't process payments. Buyers and sellers arrange the handover and any p
 ### Is it free?
 Yes. Listing and contacting sellers are free.
 
+### Do I need an invite to join?
+GrabMySeats may be invite-only while we grow. When it is, you need an invite code from someone who already uses GrabMySeats to create an account:
+- Tap the invite link they share, or open Sign up and type their code into the Invite code box. This works the same in the Android app and on the website.
+- Capitals, spaces and dashes don't matter. New codes leave out 0, O, 1 and I so they're easy to read out; on an older code with a 0 or 1, typing O or I works too.
+- If you're told "This invite link isn't valid anymore", ask the person who invited you for their current code.
+- Already have an account? You never need a code to sign in.
+
 ### How do I sign in?
 Enter your email address or phone number and we send you a one-time code. There is no password to remember. Don't share the code with anyone.
 
@@ -92,7 +99,7 @@ Go to Account to edit your name, photo and other profile details.
 It shows that the person has confirmed their email address or phone number.
 
 ### How does the referral code work?
-Share your referral link or code. Signing up alone doesn't earn points: a referral counts once the person you referred lists a ticket or gets a seller's contact info, and each person counts only once. You earn 200 points for every 20 referrals that count. Points are tracked in your account. Rewards are coming soon.
+Your referral code is also your invite code: find it, and your link, under Refer & Earn on your Account page. Share your referral link or code. Signing up alone doesn't earn points: a referral counts once the person you referred lists a ticket or gets a seller's contact info, and each person counts only once. You earn 200 points for every 20 referrals that count. Points are tracked in your account. Rewards are coming soon.
 
 ### How do I delete my account?
 Go to Account, then Delete my account. You can also read what we delete and what we keep at /delete-account, or email support@grabmyseats.com.

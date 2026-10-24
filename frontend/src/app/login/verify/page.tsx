@@ -8,8 +8,16 @@ import { AuthShell } from "@/components/auth/AuthShell";
 import { OtpInput } from "@/components/auth/OtpInput";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
+import { InviteCodeField } from "@/components/auth/InviteCodeField";
 import { useAuth } from "@/context/AuthContext";
+import { useAuthOptions } from "@/hooks/useAuthOptions";
 import { ApiError, confirmSignup, requestOtp, verifyOtpCode } from "@/lib/api";
+import {
+  INVITE_REQUIRED_MESSAGE,
+  clearSavedReferralCode,
+  loadSavedReferralCode,
+  normalizeReferralCode,
+} from "@/lib/referralCode";
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -30,6 +38,7 @@ function VerifyForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { login } = useAuth();
+  const { requireReferral } = useAuthOptions();
   // ?email= is what links into this page looked like before phone sign-in.
   const legacyEmail = searchParams.get("email");
   const channel: IdentifierChannel =
@@ -50,6 +59,9 @@ function VerifyForm() {
   const [secondsLeft, setSecondsLeft] = useState(RESEND_COOLDOWN_SECONDS);
   const [signupToken, setSignupToken] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  // "No account yet" screen only - prefilled from the link's code or one
+  // saved on this device once that screen appears.
+  const [inviteCode, setInviteCode] = useState("");
 
   useEffect(() => {
     if (!identifier) {
@@ -68,6 +80,9 @@ function VerifyForm() {
   function finish(user: User, token: string, isNewAccount: boolean) {
     login(token, user);
     if (isNewAccount) {
+      // The invite code has done its job - don't reuse it for another
+      // sign-up on this device.
+      clearSavedReferralCode();
       // Referral linking (if any) already happened server-side - welcome
       // just has to carry `next` one step further.
       router.replace(`/login/welcome?next=${encodeURIComponent(next)}`);
@@ -93,6 +108,7 @@ function VerifyForm() {
         ...(ref ? { ref } : {}),
       });
       if ("noAccount" in result) {
+        setInviteCode(normalizeReferralCode(ref) || loadSavedReferralCode());
         setSignupToken(result.signupToken);
         setIsVerifying(false);
         return;
@@ -104,12 +120,19 @@ function VerifyForm() {
     }
   }
 
+  // The backend checks the invite code itself (and keeps the sign-up token
+  // alive on a bad one), so a typo here can just be corrected and retried.
   async function handleCreateAccount() {
     if (!signupToken) return;
     setError(null);
+    const invite = normalizeReferralCode(inviteCode);
+    if (requireReferral && !invite) {
+      setError(INVITE_REQUIRED_MESSAGE);
+      return;
+    }
     setIsCreating(true);
     try {
-      const { user, token, isNewAccount } = await confirmSignup(signupToken, ref ?? undefined);
+      const { user, token, isNewAccount } = await confirmSignup(signupToken, invite || undefined);
       finish(user, token, isNewAccount);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
@@ -122,7 +145,7 @@ function VerifyForm() {
     setNotice(null);
     setIsResending(true);
     try {
-      await requestOtp(channel, identifier);
+      await requestOtp(channel, identifier, normalizeReferralCode(ref) || loadSavedReferralCode() || undefined);
       setSecondsLeft(RESEND_COOLDOWN_SECONDS);
       setOtpKey((k) => k + 1);
       setCode("");
@@ -148,10 +171,13 @@ function VerifyForm() {
   if (signupToken) {
     return (
       <AuthShell title="No account yet" subtitle={`There's no GrabMySeats account for ${identifier}.`}>
-        <Button onClick={handleCreateAccount} isLoading={isCreating}>
-          {isCreating ? "Creating..." : "Create an account"}
-        </Button>
+        <InviteCodeField value={inviteCode} onChange={setInviteCode} required={requireReferral} />
         <ErrorText>{error}</ErrorText>
+        <div className="mt-6">
+          <Button onClick={handleCreateAccount} isLoading={isCreating}>
+            {isCreating ? "Creating..." : "Create an account"}
+          </Button>
+        </div>
         <p className="mt-5 text-center text-sm text-muted">
           <Link href={backHref} className="font-medium text-gold hover:text-gold-dim">
             Use a different {channel === "email" ? "email" : "number"}

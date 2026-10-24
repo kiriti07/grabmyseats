@@ -4,6 +4,7 @@ import type {
   AuthOptions,
   IdentifierChannel,
   OtpVerifyResult,
+  ReferralCheckResult,
   Category,
   CompleteProfileInput,
   CreateRatingInput,
@@ -98,13 +99,25 @@ export function fetchAuthOptions(): Promise<AuthOptions> {
 
 // Sends a 6-digit code to an email or phone. The response is the same
 // whether or not an account exists for it - see POST /api/auth/otp/request.
+// While sign-up is invite-only, a new email/phone only actually gets a code
+// along with a valid invite code (ref).
 export function requestOtp(
   channel: IdentifierChannel,
   identifier: string,
+  ref?: string,
 ): Promise<{ message: string }> {
   return request("/api/auth/otp/request", {
     method: "POST",
-    body: JSON.stringify({ channel, identifier }),
+    body: JSON.stringify({ channel, identifier, ...(ref ? { ref } : {}) }),
+  });
+}
+
+// Whether an invite code would be accepted at sign-up - checked before a
+// sign-in code is sent, so a typo shows up straight away.
+export function checkReferralCode(code: string): Promise<ReferralCheckResult> {
+  return request("/api/auth/referral/check", {
+    method: "POST",
+    body: JSON.stringify({ code }),
   });
 }
 

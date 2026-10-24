@@ -5,11 +5,13 @@ import type { AuthOptions } from "@grabmyseats/shared";
 import { fetchAuthOptions } from "@/lib/api";
 
 // Conservative until loaded (and if the fetch fails): no phone option, no
-// phone requirement - the backend enforces the real rules either way.
+// phone requirement, invite code optional - the backend enforces the real
+// rules either way.
 const DEFAULT_OPTIONS: AuthOptions = {
   phoneOtpAvailable: false,
   requirePhoneVerification: false,
   smsCountryCodes: ["91"],
+  requireReferral: false,
 };
 
 // Module-level so every screen in a session shares one fetch.

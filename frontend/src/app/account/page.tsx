@@ -203,6 +203,16 @@ export default function AccountPage() {
               your next reward.
             </p>
 
+            {/* Sign-up can be invite-only, and someone installing the app
+                has no link to tap - so the code is shown big enough to read
+                out or type in. */}
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-muted">Your invite code</span>
+              <span className="font-mono text-lg tracking-widest text-foreground">
+                {referrals.referralCode}
+              </span>
+            </div>
+
             <div className="mt-3 flex items-center gap-2">
               <input
                 readOnly
