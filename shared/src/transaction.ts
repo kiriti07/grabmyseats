@@ -103,6 +103,9 @@ export interface TransactionDetail {
     movieName: string;
     theaterName: string;
     showtime: string;
+    // See ./listingDetails.ts - null when not given.
+    seatType: string | null;
+    description: string | null;
   };
   party: "buyer" | "seller";
   // The backend's current PAYMENT_MODE (see backend/src/lib/config.ts).

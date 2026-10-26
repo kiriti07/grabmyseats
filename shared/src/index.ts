@@ -1,6 +1,7 @@
 export * from "./user";
 export * from "./config";
 export * from "./listing";
+export * from "./listingDetails";
 export * from "./transaction";
 export * from "./payment";
 export * from "./reviewFlag";

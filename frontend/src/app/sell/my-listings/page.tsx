@@ -21,6 +21,9 @@ import { QuantityStepper } from "@/components/buy/QuantityStepper";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
+import { ListingDetailsFields } from "@/components/sell/ListingDetailsFields";
+import { ListingExtras } from "@/components/sell/ListingExtras";
+import { listingDetailsProblem, listingEditPatch } from "@/lib/listingDetailsForm";
 
 type ActionKind = "sold" | "deactivate" | "edit";
 
@@ -41,6 +44,8 @@ export default function MyListingsPage() {
   const [editPricePerSeat, setEditPricePerSeat] = useState("");
   const [editShowtime, setEditShowtime] = useState("");
   const [editTotalSeats, setEditTotalSeats] = useState("");
+  const [editSeatType, setEditSeatType] = useState("");
+  const [editDescription, setEditDescription] = useState("");
 
   useEffect(() => {
     fetchMyListings()
@@ -66,6 +71,8 @@ export default function MyListingsPage() {
       setEditPricePerSeat(String(listing.pricePerSeat));
       setEditShowtime(listing.showtime);
       setEditTotalSeats(String(listing.totalSeats));
+      setEditSeatType(listing.seatType ?? "");
+      setEditDescription(listing.description ?? "");
     }
     setActiveAction({ listingId: listing.id, kind });
   }
@@ -145,19 +152,37 @@ export default function MyListingsPage() {
       }
     }
 
+    const detailsError = listingDetailsProblem(listing.category, editSeatType, editDescription);
+    if (detailsError) {
+      setActionError(detailsError);
+      return;
+    }
+
+    // Only what changed is sent - an unchanged showtime or seat count would
+    // otherwise re-run alert matching on the server.
+    const patch = listingEditPatch(listing, {
+      pricePerSeat: price,
+      showtime: showtimeIso,
+      totalSeats: seats,
+      seatType: editSeatType,
+      description: editDescription,
+    });
+    if (!patch) {
+      closeAction();
+      return;
+    }
+
     setIsSubmittingAction(true);
     try {
-      const { listing: updated } = await updateListing(listing.id, {
-        pricePerSeat: price,
-        showtime: showtimeIso,
-        ...(seatsEditable ? { totalSeats: seats } : {}),
-      });
+      const { listing: updated } = await updateListing(listing.id, patch);
       patchListing(listing.id, {
         pricePerSeat: updated.pricePerSeat,
         showtime: updated.showtime,
         totalSeats: updated.totalSeats,
         availableSeats: updated.availableSeats,
         seatsSold: updated.totalSeats - updated.availableSeats,
+        seatType: updated.seatType,
+        description: updated.description,
       });
       closeAction();
     } catch (err) {
@@ -218,6 +243,12 @@ export default function MyListingsPage() {
                       <CategoryBadge category={listing.category} />
                     </div>
                   </div>
+
+                  <ListingExtras
+                    seatType={listing.seatType}
+                    description={listing.description}
+                    className="mt-2"
+                  />
 
                   <div className="mt-2 flex items-center justify-between text-xs text-muted">
                     <span>{formatShowtimeFull(listing.showtime)}</span>
@@ -397,6 +428,16 @@ export default function MyListingsPage() {
                               </p>
                             )}
                           </div>
+
+                          <ListingDetailsFields
+                            category={listing.category}
+                            seatType={editSeatType}
+                            onSeatTypeChange={setEditSeatType}
+                            description={editDescription}
+                            onDescriptionChange={setEditDescription}
+                            idPrefix={`edit-${listing.id}`}
+                            small
+                          />
 
                           <ErrorText>{actionError}</ErrorText>
                           <div className="flex gap-2">

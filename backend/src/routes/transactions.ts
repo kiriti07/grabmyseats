@@ -165,6 +165,8 @@ transactionsRouter.get("/:id", requireAuth, async (req, res) => {
         movieName: transaction.listing.movieName,
         theaterName: transaction.listing.theaterName,
         showtime: transaction.listing.showtime.toISOString(),
+        seatType: transaction.listing.seatType,
+        description: transaction.listing.description,
       },
       party,
       paymentMode: PAYMENT_MODE,

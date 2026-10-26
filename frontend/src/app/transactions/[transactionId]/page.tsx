@@ -16,6 +16,7 @@ import { RatingSummaryBadge } from "@/components/ui/RatingSummaryBadge";
 import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
 import { ReportUserButton } from "@/components/report/ReportUserButton";
 import { ContactPhone } from "@/components/ui/ContactPhone";
+import { ListingExtras } from "@/components/sell/ListingExtras";
 import { formatShowtimeFull, formatTimeOnly } from "@/lib/format";
 import { getCheckInWindow } from "@/lib/checkInWindow";
 import { CONTACT_ONLY_DISCLAIMER } from "@/lib/paymentMode";
@@ -360,6 +361,11 @@ function TransactionDetailContent() {
               <p className="text-sm text-muted">
                 {detail.listing.theaterName} · {formatShowtimeFull(detail.listing.showtime)}
               </p>
+              <ListingExtras
+                seatType={detail.listing.seatType}
+                description={detail.listing.description}
+                className="mt-2"
+              />
             </div>
 
             {detail.party === "buyer" && (
@@ -521,6 +527,11 @@ function ContactOnlyDetail({
         <p className="text-sm text-muted">
           {detail.listing.theaterName} · {formatShowtimeFull(detail.listing.showtime)}
         </p>
+        <ListingExtras
+          seatType={detail.listing.seatType}
+          description={detail.listing.description}
+          className="mt-2"
+        />
 
         <p className="mt-4 text-sm text-muted">
           {detail.party === "buyer"

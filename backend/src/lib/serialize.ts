@@ -96,6 +96,8 @@ export function toSharedListing(listing: PrismaListing): SharedListing {
     screenshotUrl: listing.screenshotUrl,
     status: listing.status,
     availableDeliveryMethods: listing.availableDeliveryMethods,
+    seatType: listing.seatType,
+    description: listing.description,
     createdAt: listing.createdAt.toISOString(),
   };
 }
@@ -131,6 +133,8 @@ export function toListingDetail(
     locationPrecision: listing.locationPrecision,
     cityName: cityNameForId(listing.cityId),
     availableDeliveryMethods: listing.availableDeliveryMethods,
+    seatType: listing.seatType,
+    description: listing.description,
     paymentMode: PAYMENT_MODE,
     sellerRatingSummary,
     viewCount,
@@ -165,6 +169,8 @@ export function toMyListing(
     screenshotUrl: listing.screenshotUrl,
     status: listing.status,
     availableDeliveryMethods: listing.availableDeliveryMethods,
+    seatType: listing.seatType,
+    description: listing.description,
     createdAt: listing.createdAt.toISOString(),
     viewCount: listing._count.views,
     contactCount: listing._count.contacts,

@@ -3,6 +3,7 @@ import type { ListingSearchResult } from "@grabmyseats/shared";
 import type { Coordinates } from "@/lib/geolocation";
 import type { CategoryFilter } from "./CategoryTabs";
 import { formatListingDistance, formatShowtimeShort } from "@/lib/format";
+import { ListingExtras } from "@/components/sell/ListingExtras";
 
 export function ListingResults({
   listings,
@@ -62,6 +63,12 @@ export function ListingResults({
                 ₹{listing.pricePerSeat}
               </p>
             </div>
+            <ListingExtras
+              seatType={listing.seatType}
+              description={listing.description}
+              compact
+              className="mt-1.5"
+            />
             <div className="mt-2 flex items-center justify-between text-xs text-muted">
               <span>{formatShowtimeShort(listing.showtime)}</span>
               <span>

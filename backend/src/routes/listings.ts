@@ -14,7 +14,14 @@ import type {
   ReserveResult,
   TransactionContact,
 } from "@grabmyseats/shared";
-import { LIVE_LISTING_STATUSES, cityIdForName, cityNameForId, isShowtimeInFuture } from "@grabmyseats/shared";
+import {
+  LIVE_LISTING_STATUSES,
+  checkListingDescription,
+  checkSeatType,
+  cityIdForName,
+  cityNameForId,
+  isShowtimeInFuture,
+} from "@grabmyseats/shared";
 import { TITLE_SIMILARITY_THRESHOLD } from "../lib/searchMatch";
 import { prisma } from "../lib/prisma";
 import { Prisma } from "../generated/prisma/client";
@@ -225,7 +232,15 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
     "IN_PERSON",
   ];
 
+  // Optional, and never part of alert matching or the ticket fingerprint -
+  // see shared/src/listingDetails.ts. Unlike the fields above, a bad value
+  // is an error rather than silently dropped.
+  const seatType = checkSeatType(category, req.body?.seatType);
+  const description = checkListingDescription(req.body?.description);
+
   const errors: string[] = [];
+  if (!seatType.ok) errors.push(seatType.error);
+  if (!description.ok) errors.push(description.error);
   if (!movieName) errors.push("movieName is required");
   if (!theaterName) errors.push("theaterName is required");
   if (!bookingId) errors.push("bookingId is required");
@@ -340,6 +355,8 @@ listingsRouter.post("/", requireAuth, requireVerifiedIdentity, uploadScreenshot,
         totalAmountPaid,
         ticketFingerprint: ticket.fingerprint,
         availableDeliveryMethods,
+        seatType: seatType.ok ? seatType.value : null,
+        description: description.ok ? description.value : null,
       },
     });
   } catch (err) {
@@ -504,6 +521,8 @@ interface ListingSearchRow {
   distanceKm: number;
   locationPrecision: LocationPrecision;
   cityId: string | null;
+  seatType: string | null;
+  description: string | null;
 }
 
 // Mounted before any future `/:id` route so it isn't shadowed by a param match.
@@ -634,6 +653,8 @@ listingsRouter.get("/search", async (req, res) => {
       "pricePerSeat",
       "locationPrecision",
       "cityId",
+      "seatType",
+      description,
       ST_Distance("theaterLocation", ${origin}) / 1000 AS "distanceKm"
     FROM "Listing"
     WHERE ${Prisma.join(conditions, " AND ")}
@@ -651,6 +672,8 @@ listingsRouter.get("/search", async (req, res) => {
     distanceKm: row.distanceKm,
     locationPrecision: row.locationPrecision,
     cityName: cityNameForId(row.cityId),
+    seatType: row.seatType,
+    description: row.description,
   }));
 
   const body: ApiResponse<{ listings: ListingSearchResult[] }> = {
@@ -1172,10 +1195,12 @@ listingsRouter.post("/:id/deactivate", requireAuth, async (req, res) => {
 
 class SeatsAlreadyReservedError extends Error {}
 class PriceIntegrityUpdateError extends Error {}
+class SeatTypeNotAllowedError extends Error {}
 
 // Basic self-service edit for a still-live listing: pricePerSeat, showtime,
-// and/or totalSeats. All optional (send only what's changing) but at least
-// one is required. totalSeats is rejected unless availableSeats ===
+// totalSeats, seatType and/or description. All optional (send only what's
+// changing) but at least one is required. seatType/description: null or ""
+// clears them. totalSeats is rejected unless availableSeats ===
 // totalSeats already - editing seat count once any are reserved/sold would
 // corrupt that accounting (there's no way to know *which* seats the new
 // count should refer to). When totalSeats does change, availableSeats is
@@ -1192,10 +1217,21 @@ listingsRouter.patch("/:id", requireAuth, async (req, res) => {
   const showtimeRaw = showtimeProvided ? requireNonEmptyString(req.body.showtime) : undefined;
   const showtime = showtimeRaw ? new Date(showtimeRaw) : null;
   const totalSeats = totalSeatsProvided ? requireFiniteNumber(req.body.totalSeats) : undefined;
+  const seatTypeProvided = req.body?.seatType !== undefined;
+  const descriptionProvided = req.body?.description !== undefined;
+  // seatType depends on the listing's category, so it's checked once the
+  // listing is loaded below.
+  const description = descriptionProvided ? checkListingDescription(req.body.description) : undefined;
 
   const errors: string[] = [];
-  if (!pricePerSeatProvided && !showtimeProvided && !totalSeatsProvided) {
-    errors.push("at least one of pricePerSeat, showtime, or totalSeats is required");
+  if (
+    !pricePerSeatProvided &&
+    !showtimeProvided &&
+    !totalSeatsProvided &&
+    !seatTypeProvided &&
+    !descriptionProvided
+  ) {
+    errors.push("at least one of pricePerSeat, showtime, totalSeats, seatType, or description is required");
   }
   if (pricePerSeatProvided && (pricePerSeat === null || pricePerSeat === undefined || pricePerSeat <= 0)) {
     errors.push("pricePerSeat must be a positive number");
@@ -1210,6 +1246,7 @@ listingsRouter.patch("/:id", requireAuth, async (req, res) => {
   if (totalSeatsProvided && (totalSeats === null || totalSeats === undefined || totalSeats <= 0 || !Number.isInteger(totalSeats))) {
     errors.push("totalSeats must be a positive integer");
   }
+  if (description && !description.ok) errors.push(description.error);
   if (errors.length > 0) {
     const body: ApiResponse<never> = { success: false, error: errors.join("; ") };
     res.status(400).json(body);
@@ -1217,7 +1254,7 @@ listingsRouter.patch("/:id", requireAuth, async (req, res) => {
   }
 
   try {
-    const listing = await prisma.$transaction(async (tx) => {
+    const { listing, rematch } = await prisma.$transaction(async (tx) => {
       const existing = await tx.listing.findUnique({ where: { id: listingId } });
       if (!existing) throw new ListingNotFoundError();
       if (existing.sellerId !== req.user!.id) throw new NotListingOwnerError();
@@ -1225,6 +1262,8 @@ listingsRouter.patch("/:id", requireAuth, async (req, res) => {
       if (totalSeatsProvided && existing.availableSeats !== existing.totalSeats) {
         throw new SeatsAlreadyReservedError();
       }
+      const seatType = seatTypeProvided ? checkSeatType(existing.category, req.body.seatType) : undefined;
+      if (seatType && !seatType.ok) throw new SeatTypeNotAllowedError(seatType.error);
 
       const nextPricePerSeat = pricePerSeat ?? existing.pricePerSeat;
       const nextTotalSeats = totalSeats ?? existing.totalSeats;
@@ -1243,9 +1282,17 @@ listingsRouter.patch("/:id", requireAuth, async (req, res) => {
         );
       }
 
-      const data: { pricePerSeat?: number; showtime?: Date; totalSeats?: number; availableSeats?: number } =
-        {};
+      const data: {
+        pricePerSeat?: number;
+        showtime?: Date;
+        totalSeats?: number;
+        availableSeats?: number;
+        seatType?: string | null;
+        description?: string | null;
+      } = {};
       if (pricePerSeat != null) data.pricePerSeat = pricePerSeat;
+      if (seatType?.ok) data.seatType = seatType.value;
+      if (description?.ok) data.description = description.value;
       if (showtime) data.showtime = showtime;
       if (totalSeats != null) {
         data.totalSeats = totalSeats;
@@ -1254,12 +1301,20 @@ listingsRouter.patch("/:id", requireAuth, async (req, res) => {
         data.availableSeats = totalSeats;
       }
 
-      return tx.listing.update({ where: { id: listingId }, data });
+      const listing = await tx.listing.update({ where: { id: listingId }, data });
+      // Compared with the stored values, not just "was it sent": the edit
+      // form sends everything, and saving only a new price, seat type or
+      // description must not re-run matching.
+      const rematch =
+        (showtime !== null && showtime.getTime() !== existing.showtime.getTime()) ||
+        (totalSeats != null && totalSeats !== existing.totalSeats);
+      return { listing, rematch };
     });
 
-    // A new date/time or seat count can match alerts it didn't before (the
-    // price can't - it isn't part of matching).
-    if (showtimeProvided || totalSeatsProvided) matchListingInBackground(res, listing.id);
+    // A new date/time or seat count can match alerts it didn't before
+    // (price, seat type and description can't - they aren't part of
+    // matching).
+    if (rematch) matchListingInBackground(res, listing.id);
 
     const body: ApiResponse<{ listing: SharedListing }> = {
       success: true,
@@ -1296,7 +1351,7 @@ listingsRouter.patch("/:id", requireAuth, async (req, res) => {
       res.status(409).json(body);
       return;
     }
-    if (err instanceof PriceIntegrityUpdateError) {
+    if (err instanceof PriceIntegrityUpdateError || err instanceof SeatTypeNotAllowedError) {
       const body: ApiResponse<never> = { success: false, error: err.message };
       res.status(400).json(body);
       return;

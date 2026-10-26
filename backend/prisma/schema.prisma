@@ -304,6 +304,14 @@ model Listing {
   // partial index, so it isn't declared here; generate migrations
   // schema-to-schema so it's never dropped.
   ticketFingerprint String?
+  // Optional seller-written extras (shared/src/listingDetails.ts). seatType is
+  // one of SEAT_TYPE_OPTIONS for the listing's category - plain text, not an
+  // enum, so new options need no migration; validated by the API. description
+  // is plain text, normalized and checked for contact details/links
+  // server-side. Both null on listings created before they existed. Neither
+  // is part of alert matching or the ticket fingerprint.
+  seatType        String?
+  description     String?  @db.VarChar(300)
   status          ListingStatus                          @default(ACTIVE)
   createdAt       DateTime                               @default(now())
   transactions    Transaction[]

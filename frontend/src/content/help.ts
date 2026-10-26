@@ -48,6 +48,12 @@ Enter your email address or phone number and we send you a one-time code. There 
 ### How do I list a ticket?
 Tap Sell, choose the category (Movies, Events or Sports), upload your ticket screenshot, check the event details we read from it, pick the date and time, add the venue and seat details and your price, then post.
 
+You can also add, if you like:
+- Seat type (Movies only): Recliner, Top row, Middle row or Bottom row. Pick "Not sure / skip" if you don't know.
+- A short description, up to 300 characters, for details like corner seats, aisle seats or seats together in the middle of a row.
+- Don't put phone numbers, email addresses or links in the description. Buyers get your contact details after reserving.
+- You can change both later by editing the listing.
+
 ### Why does my screenshot need a barcode?
 We use the barcode to check that the same ticket isn't listed twice. Upload the full ticket screenshot with the barcode clearly visible. We don't keep your screenshot image; we store only a one-way code made from the barcode.
 

@@ -18,13 +18,13 @@
 //  This text is shown as-is: links and HTML are not interpreted.
 // =============================================================================
 
-export const TERMS_LAST_UPDATED = "15 October 2026";
+export const TERMS_LAST_UPDATED = "26 October 2026";
 
 // ▼▼▼ Paste between the two backticks below ▼▼▼
 export const TERMS_TEXT = `
 # Terms and Conditions
 
-Last updated: 15 October 2026
+Last updated: 26 October 2026
 
 These Terms govern your use of GrabMySeats (the website grabmyseats.com and the GrabMySeats mobile app), operated by Brilliant Eight, 402 Burugupalli Residency, Gachibowli, Hyderabad, Telangana, India 500032, India ("we", "us"). By creating an account or using GrabMySeats you agree to these Terms. If you do not agree, please do not use the service.
 
@@ -41,6 +41,7 @@ These Terms govern your use of GrabMySeats (the website grabmyseats.com and the 
 ## 3. Listing tickets (sellers)
 - You may list only tickets that you genuinely own and are allowed to transfer.
 - Details you enter (event, venue, date, time, number of seats, price) must be accurate.
+- Any description you add must be accurate and must not include phone numbers, email addresses, links or other contact details. We may edit or remove descriptions that break these Terms.
 - Please price tickets fairly. Listings priced far above the original face value may be removed.
 - You must upload a ticket screenshot that shows its barcode. We read the barcode to check that the same ticket is not listed twice. We keep only a one-way fingerprint of the barcode, not the screenshot image.
 - Do not list a ticket that you have already sold or that has been cancelled. Mark it as sold or withdraw it as soon as it is no longer available.

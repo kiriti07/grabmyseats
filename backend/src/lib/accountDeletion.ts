@@ -19,7 +19,8 @@ import { isPhoneCountryAllowed, type IdentifierChannel } from "./validators";
 //
 // - open reservations, either side: EXPIRED, seats given back;
 // - the user's live listings (ACTIVE / PARTIALLY_SOLD): WITHDRAWN;
-//   past ones stay, with their one-way ticket fingerprint;
+//   past ones stay, with their one-way ticket fingerprint; the seller-written
+//   description is cleared on all of them (free text, may be personal);
 // - alerts (+ their notifications), push devices and push history,
 //   listing views and contacts, venue pin votes and points: deleted;
 // - ratings they gave: stars kept (sellers' averages stay honest), comment
@@ -116,6 +117,10 @@ export async function deleteUserAccount(userId: string): Promise<void> {
     await tx.listing.updateMany({
       where: { sellerId: userId, status: { in: ["ACTIVE", "PARTIALLY_SOLD"] } },
       data: { status: "WITHDRAWN" },
+    });
+    await tx.listing.updateMany({
+      where: { sellerId: userId, description: { not: null } },
+      data: { description: null },
     });
 
     await tx.alertNotification.deleteMany({ where: { alert: { userId } } });

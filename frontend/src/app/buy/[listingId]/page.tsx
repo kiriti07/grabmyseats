@@ -9,6 +9,7 @@ import { DeliveryMethodPicker } from "@/components/buy/DeliveryMethodPicker";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
+import { ListingExtras } from "@/components/sell/ListingExtras";
 import { RatingSummaryBadge } from "@/components/ui/RatingSummaryBadge";
 import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
 import { ContactPhone } from "@/components/ui/ContactPhone";
@@ -157,6 +158,12 @@ function ListingDetailContent() {
                 </div>
               )}
             </dl>
+
+            <ListingExtras
+              seatType={listing.seatType}
+              description={listing.description}
+              className="mt-4 rounded-lg border border-line bg-surface px-4 py-3"
+            />
 
             {revealedContact ? (
               <ContactReveal

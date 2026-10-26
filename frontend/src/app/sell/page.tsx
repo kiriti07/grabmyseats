@@ -13,6 +13,9 @@ import {
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { AutoFilledBadge } from "@/components/sell/AutoFilledBadge";
+import { ListingDetailsFields } from "@/components/sell/ListingDetailsFields";
+import { ListingExtras } from "@/components/sell/ListingExtras";
+import { appendListingDetails, listingDetailsProblem, seatTypeForCategory } from "@/lib/listingDetailsForm";
 import { INPUT_CLASS } from "@/lib/styles";
 import { formatShowtimeFull } from "@/lib/format";
 import { showtimeProblem } from "@/lib/showtime";
@@ -73,6 +76,9 @@ export default function SellPage() {
   const [totalSeats, setTotalSeats] = useState("1");
   const [pricePerSeat, setPricePerSeat] = useState("");
   const [bookingId, setBookingId] = useState("");
+  // Optional - see shared/src/listingDetails.ts. "" = none.
+  const [seatType, setSeatType] = useState("");
+  const [description, setDescription] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const screenshotInputRef = useRef<HTMLInputElement>(null);
   // Shown in red right under the upload field. Stays until the seller picks
@@ -310,6 +316,11 @@ export default function SellPage() {
       setError("Pick at least one delivery method");
       return;
     }
+    const detailsError = listingDetailsProblem(category, seatType, description);
+    if (detailsError) {
+      setError(detailsError);
+      return;
+    }
 
     const formData = new FormData();
     formData.append("category", category);
@@ -322,6 +333,7 @@ export default function SellPage() {
     formData.append("pricePerSeat", String(price));
     formData.append("showtime", showtime);
     formData.append("screenshot", screenshot);
+    appendListingDetails(formData, seatType, description);
     if (pinnedVenue) {
       formData.append("theaterLat", String(pinnedVenue.lat));
       formData.append("theaterLng", String(pinnedVenue.lng));
@@ -416,6 +428,11 @@ export default function SellPage() {
               <dd className="text-gold">₹{createdListing.pricePerSeat}</dd>
             </div>
           </dl>
+          <ListingExtras
+            seatType={createdListing.seatType}
+            description={createdListing.description}
+            className="mt-3 border-t border-line pt-3 text-left"
+          />
 
           <div className="mt-6">
             <Link
@@ -466,7 +483,10 @@ export default function SellPage() {
                   name="category"
                   value={c}
                   checked={category === c}
-                  onChange={() => setCategory(c)}
+                  onChange={() => {
+                    setCategory(c);
+                    setSeatType((prev) => seatTypeForCategory(c, prev));
+                  }}
                   className="sr-only"
                 />
                 {CATEGORY_LABEL[c]}
@@ -714,6 +734,14 @@ export default function SellPage() {
             className={INPUT_CLASS}
           />
         </div>
+
+        <ListingDetailsFields
+          category={category}
+          seatType={seatType}
+          onSeatTypeChange={setSeatType}
+          description={description}
+          onDescriptionChange={setDescription}
+        />
 
         <fieldset>
           <legend className="mb-1.5 text-sm font-medium text-foreground">Delivery method</legend>

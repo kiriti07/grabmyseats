@@ -64,6 +64,10 @@ export interface Listing {
   qrData: string | null;
   screenshotUrl: string | null;
   status: ListingStatus;
+  // Optional seller-written extras - see ./listingDetails.ts. null when
+  // the seller left them out, and on listings that predate them.
+  seatType: string | null;
+  description: string | null;
   createdAt: string;
 }
 
@@ -71,10 +75,16 @@ export interface Listing {
 // changing), but totalSeats is rejected server-side unless
 // availableSeats === totalSeats already - see the route for why (changing
 // seat count once any are reserved/sold would corrupt that accounting).
+//
+// seatType/description: null or "" clears them. Changing only these (or the
+// price) never re-runs alert matching - only an actual change of showtime
+// or seat count does.
 export interface UpdateListingInput {
   pricePerSeat?: number;
   showtime?: string;
   totalSeats?: number;
+  seatType?: string | null;
+  description?: string | null;
 }
 
 // Public search result shape: deliberately omits bookingId, sellerId,
@@ -92,6 +102,8 @@ export interface ListingSearchResult {
   distanceKm: number;
   locationPrecision: LocationPrecision;
   cityName: string | null;
+  seatType: string | null;
+  description: string | null;
 }
 
 // GET /api/listings/:id response: same public-safe fields as
@@ -113,6 +125,8 @@ export interface ListingDetail {
   locationPrecision: LocationPrecision;
   cityName: string | null;
   availableDeliveryMethods: DeliveryMethod[];
+  seatType: string | null;
+  description: string | null;
   // The backend's current PAYMENT_MODE (see backend/src/lib/config.ts) -
   // carried on this response, rather than a separate frontend config fetch,
   // so the buy page knows before rendering whether to offer "Reserve
@@ -167,6 +181,8 @@ export interface MyListing {
   screenshotUrl: string | null;
   status: ListingStatus;
   availableDeliveryMethods: DeliveryMethod[];
+  seatType: string | null;
+  description: string | null;
   createdAt: string;
   transactions: MyListingTransactionSummary[];
   // Same deduplicated, per-user counts as ListingDetail.viewCount/
