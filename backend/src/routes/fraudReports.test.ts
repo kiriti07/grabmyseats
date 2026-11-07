@@ -152,7 +152,37 @@ describe("fraud reports", () => {
       expect(res.body.data.report.reportedUserId).toBe(reportedId);
       expect(res.body.data.report.relatedTransactionId).toBe(transactionId);
       expect(res.body.data.report.evidenceUrls).toEqual([]);
+      // No reason sent (a client without the picker) - FRAUD, as before.
+      expect(res.body.data.report.reason).toBe("FRAUD");
       reportIds.push(res.body.data.report.id);
+    });
+
+    it("stores the reason picked in the form", async () => {
+      const res = await request(app)
+        .post("/api/fraud-reports")
+        .set("Authorization", `Bearer ${reporterToken}`)
+        .field("relatedTransactionId", transactionId)
+        .field("reason", "OFFENSIVE")
+        .field("description", "Abusive messages after I reserved.");
+      expect(res.status).toBe(201);
+      expect(res.body.data.report.reason).toBe("OFFENSIVE");
+      reportIds.push(res.body.data.report.id);
+      const stored = await prisma.fraudReport.findUniqueOrThrow({
+        where: { id: res.body.data.report.id },
+      });
+      expect(stored.reason).toBe("OFFENSIVE");
+    });
+
+    it("400s an unknown reason, without filing anything", async () => {
+      const before = await prisma.fraudReport.count({ where: { reporterId } });
+      const res = await request(app)
+        .post("/api/fraud-reports")
+        .set("Authorization", `Bearer ${reporterToken}`)
+        .field("relatedTransactionId", transactionId)
+        .field("reason", "SPAM")
+        .field("description", "Testing");
+      expect(res.status).toBe(400);
+      expect(await prisma.fraudReport.count({ where: { reporterId } })).toBe(before);
     });
 
     it("creates a report by reportedPhone alone (no id) - the contact-reveal case", async () => {

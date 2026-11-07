@@ -30,7 +30,8 @@ Yes. Listing and contacting sellers are free.
 
 ### Do I need an invite to join?
 GrabMySeats may be invite-only while we grow. When it is, you need an invite code from someone who already uses GrabMySeats to create an account:
-- Tap the invite link they share, or open Sign up and type their code into the Invite code box. This works the same in the Android app and on the website.
+- In the Android app: open Sign up and type their code into the Invite code box. Invite links open in your phone's browser, not in the app, so type the code in the app instead.
+- On the website: tap the invite link they share (the code is filled in for you), or open Sign up and type their code.
 - Capitals, spaces and dashes don't matter. New codes leave out 0, O, 1 and I so they're easy to read out; on an older code with a 0 or 1, typing O or I works too.
 - If you're told "This invite link isn't valid anymore", ask the person who invited you for their current code.
 - Already have an account? You never need a code to sign in.
@@ -92,7 +93,7 @@ Use Notify me to get an alert when tickets that match your search are listed.
 
 ## Reporting a problem
 ### How do I report a user?
-After you tap "Get seller's contact info", tap "Report this user" on that screen or on the transaction screen. Describe what happened. You can attach screenshots as proof. We review reports and may suspend accounts that break our Terms.
+After you tap "Get seller's contact info", tap "Report this user" on that screen or on the transaction screen. Choose a reason (scam or fake ticket, offensive content, harassment, or something else) and describe what happened. You can attach screenshots or a PDF as proof. We review reports and may suspend accounts that break our Terms.
 
 ### How do ratings work?
 Only buyers rate sellers. After you get a seller's contact info, you can rate that seller from My Purchases. Ratings help other users decide who to trust.

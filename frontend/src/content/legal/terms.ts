@@ -18,13 +18,13 @@
 //  This text is shown as-is: links and HTML are not interpreted.
 // =============================================================================
 
-export const TERMS_LAST_UPDATED = "26 October 2026";
+export const TERMS_LAST_UPDATED = "3 November 2026";
 
 // ▼▼▼ Paste between the two backticks below ▼▼▼
 export const TERMS_TEXT = `
 # Terms and Conditions
 
-Last updated: 26 October 2026
+Last updated: 3 November 2026
 
 These Terms govern your use of GrabMySeats (the website grabmyseats.com and the GrabMySeats mobile app), operated by Brilliant Eight, 402 Burugupalli Residency, Gachibowli, Hyderabad, Telangana, India 500032, India ("we", "us"). By creating an account or using GrabMySeats you agree to these Terms. If you do not agree, please do not use the service.
 
@@ -56,12 +56,13 @@ These Terms govern your use of GrabMySeats (the website grabmyseats.com and the 
 - List fake, duplicate, cancelled or stolen tickets, or tickets you do not have the right to sell.
 - Mislead or scam other users, or ask for payment without delivering a valid ticket.
 - Harass, threaten or abuse other users, or use contact details for anything other than the ticket deal.
+- Post descriptions, ratings or comments that are offensive, hateful, sexual, threatening, defamatory or discriminatory, that contain personal information about someone else, or that are unrelated to the ticket or the deal. We have zero tolerance for this content and may remove it and suspend the account without notice.
 - Create fake accounts, abuse referrals or points, or try to get around limits or security.
 - Scrape, copy, or interfere with the service, or try to access data that is not yours.
 - Use GrabMySeats for anything unlawful.
 
 ## 6. Reports, ratings and suspension
-- You can rate users and report other users you believe are fraudulent. Reports must be truthful.
+- You can rate users, and report another user for a scam or fake ticket, offensive content, harassment or anything else that breaks these Terms, from the reservation in the app. Reports must be truthful.
 - We may review reports, remove listings, and suspend or permanently remove accounts that break these Terms or put others at risk, with or without notice.
 
 ## 7. Points and referrals
@@ -74,7 +75,7 @@ These Terms govern your use of GrabMySeats (the website grabmyseats.com and the 
 - Nothing in these Terms limits rights that cannot be limited under applicable law.
 
 ## 9. Ending your account
-- You can stop using GrabMySeats at any time and can request deletion of your account as described in our Privacy Policy.
+- You can stop using GrabMySeats at any time. You can delete your account in the app or on the website from Account > Delete my account, or by following the steps at https://grabmyseats.com/delete-account. Our Privacy Policy explains what is deleted and what is kept.
 - We may suspend or end your access if you break these Terms.
 
 ## 10. Changes

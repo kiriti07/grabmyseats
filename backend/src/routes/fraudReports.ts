@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import type { ApiResponse, FraudReport as SharedFraudReport } from "@grabmyseats/shared";
+import {
+  isFraudReportReason,
+  type ApiResponse,
+  type FraudReport as SharedFraudReport,
+  type FraudReportReason,
+} from "@grabmyseats/shared";
 import { prisma } from "../lib/prisma";
 import { storageProvider } from "../lib/storage";
 import { requireAuth } from "../middleware/auth";
@@ -38,9 +43,19 @@ fraudReportsRouter.post("/", requireAuth, uploadFraudEvidence, async (req, res) 
   const reportedPhone = requireNonEmptyString(req.body?.reportedPhone);
   const relatedTransactionId = requireNonEmptyString(req.body?.relatedTransactionId);
   const description = requireNonEmptyString(req.body?.description);
+  // Optional - a client without the reason picker (an older page still
+  // open) files a FRAUD report, which is all the form used to offer.
+  const rawReason = req.body?.reason;
+  const reason: FraudReportReason | null =
+    rawReason === undefined || rawReason === ""
+      ? "FRAUD"
+      : isFraudReportReason(rawReason)
+        ? rawReason
+        : null;
 
   const errors: string[] = [];
   if (!description) errors.push("description is required");
+  if (!reason) errors.push("reason is not a valid report reason");
   if (!reportedUserId && !reportedPhone && !relatedTransactionId) {
     errors.push("relatedTransactionId, reportedUserId or reportedPhone is required");
   }
@@ -95,6 +110,7 @@ fraudReportsRouter.post("/", requireAuth, uploadFraudEvidence, async (req, res) 
         reporterId: req.user!.id,
         reportedUserId: reportedUser.id,
         relatedTransactionId,
+        reason: reason!,
         description: description!,
         evidenceUrls,
       },

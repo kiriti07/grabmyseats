@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { FraudReport } from "@grabmyseats/shared";
+import { FRAUD_REPORT_REASON_LABELS, type FraudReport } from "@grabmyseats/shared";
 import { AdminButton } from "@/components/admin/AdminButton";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { ApiError, fetchFraudReports, resolveFraudReport } from "@/lib/adminApi";
@@ -68,7 +68,10 @@ export function FraudReportQueue() {
 
       {reports.map((report) => (
         <div key={report.id} className="rounded-lg border border-line bg-surface p-4">
-          <p className="text-xs text-muted">
+          <p className="text-xs font-medium text-foreground">
+            {FRAUD_REPORT_REASON_LABELS[report.reason]}
+          </p>
+          <p className="mt-1 text-xs text-muted">
             Reported user: {report.reportedUserId} · Filed by: {report.reporterId}
           </p>
           <p className="mt-2 text-sm text-foreground">{report.description}</p>

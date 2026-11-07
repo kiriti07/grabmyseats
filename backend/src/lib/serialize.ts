@@ -236,6 +236,7 @@ export function toSharedFraudReport(report: PrismaFraudReport): SharedFraudRepor
     reporterId: report.reporterId,
     reportedUserId: report.reportedUserId,
     relatedTransactionId: report.relatedTransactionId,
+    reason: report.reason,
     description: report.description,
     evidenceUrls: report.evidenceUrls,
     status: report.status,

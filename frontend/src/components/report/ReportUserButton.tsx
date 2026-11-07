@@ -1,6 +1,11 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useId, useState, type ChangeEvent } from "react";
+import {
+  FRAUD_REPORT_REASONS,
+  FRAUD_REPORT_REASON_LABELS,
+  type FraudReportReason,
+} from "@grabmyseats/shared";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { INPUT_CLASS } from "@/lib/styles";
@@ -19,7 +24,9 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024;
 // out who the other party is itself - TransactionContact never carries a
 // user id, and its phone is unverified and may be missing entirely.
 export function ReportUserButton({ relatedTransactionId }: { relatedTransactionId: string }) {
+  const reasonId = useId();
   const [isOpen, setIsOpen] = useState(false);
+  const [reason, setReason] = useState<FraudReportReason>("FRAUD");
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -50,6 +57,7 @@ export function ReportUserButton({ relatedTransactionId }: { relatedTransactionI
     try {
       await createFraudReport({
         relatedTransactionId,
+        reason,
         description: description.trim(),
         evidence: files,
       });
@@ -85,6 +93,22 @@ export function ReportUserButton({ relatedTransactionId }: { relatedTransactionI
     <div className="mt-3 rounded-lg border border-line bg-surface-raised p-3 text-left">
       <p className="text-sm font-medium text-foreground">Report user</p>
       <p className="mt-1 text-xs text-muted">Tell us what happened - our team will review it.</p>
+
+      <label htmlFor={reasonId} className="sr-only">
+        Reason
+      </label>
+      <select
+        id={reasonId}
+        value={reason}
+        onChange={(e) => setReason(e.target.value as FraudReportReason)}
+        className={`mt-2 ${INPUT_CLASS}`}
+      >
+        {FRAUD_REPORT_REASONS.map((r) => (
+          <option key={r} value={r}>
+            {FRAUD_REPORT_REASON_LABELS[r]}
+          </option>
+        ))}
+      </select>
 
       <textarea
         value={description}

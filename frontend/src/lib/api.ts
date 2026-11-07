@@ -10,6 +10,7 @@ import type {
   CreateRatingInput,
   DeliveryMethod,
   FraudReport,
+  FraudReportReason,
   GeocodePreview,
   Listing,
   ListingDetail,
@@ -517,11 +518,12 @@ export function removePushToken(token: string): Promise<{ removed: true }> {
 // send), the backend works out who's being reported - the other party on
 // that transaction - so nothing else is needed. Without one,
 // reportedUserId or reportedPhone identifies them. evidence files are
-// optional.
+// optional; reason defaults to FRAUD on the backend when left out.
 export function createFraudReport(data: {
   reportedUserId?: string;
   reportedPhone?: string;
   relatedTransactionId?: string;
+  reason?: FraudReportReason;
   description: string;
   evidence?: File[];
 }): Promise<{ report: FraudReport }> {
@@ -529,6 +531,7 @@ export function createFraudReport(data: {
   if (data.reportedUserId) formData.append("reportedUserId", data.reportedUserId);
   if (data.reportedPhone) formData.append("reportedPhone", data.reportedPhone);
   if (data.relatedTransactionId) formData.append("relatedTransactionId", data.relatedTransactionId);
+  if (data.reason) formData.append("reason", data.reason);
   formData.append("description", data.description);
   for (const file of data.evidence ?? []) formData.append("evidence", file);
   return multipartRequest("/api/fraud-reports", formData);

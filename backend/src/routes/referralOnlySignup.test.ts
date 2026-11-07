@@ -94,6 +94,11 @@ describe("invite-only sign-up", () => {
     return (await redis.exists(`otp:${loginOtpIdentifier("email", email)}`)) === 1;
   }
 
+  async function termsAcceptedAtOf(userId: string): Promise<Date | null> {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    return user.termsAcceptedAt;
+  }
+
   async function referrerOf(userId: string): Promise<string | null> {
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
     return user.referredByUserId;
@@ -188,6 +193,8 @@ describe("invite-only sign-up", () => {
       expect(res.status).toBe(200);
       expect(res.body.data.isNewAccount).toBe(true);
       expect(await referrerOf(res.body.data.user.id)).toBe(referrer.id);
+      // Created from the sign-up screen's consent line.
+      expect(await termsAcceptedAtOf(res.body.data.user.id)).toBeInstanceOf(Date);
     });
 
     it("lowercase, padded and dash-grouped codes match the same referrer", async () => {
@@ -255,6 +262,8 @@ describe("invite-only sign-up", () => {
         expect(res.body.data.isNewAccount).toBe(false);
         expect(res.body.data.user.id).toBe(existing.id);
       }
+      // Never asked to accept again, and logging in records nothing.
+      expect(await termsAcceptedAtOf(existing.id)).toBeNull();
     });
 
     it("get a sign-in code without any code", async () => {
@@ -316,6 +325,8 @@ describe("invite-only sign-up", () => {
       userIds.push(ok.body.data.user.id);
       expect(ok.body.data.isNewAccount).toBe(true);
       expect(await referrerOf(ok.body.data.user.id)).toBe(referrer.id);
+      // "No account yet" -> Create an account shows the consent line too.
+      expect(await termsAcceptedAtOf(ok.body.data.user.id)).toBeInstanceOf(Date);
 
       // Spent now.
       const reuse = await confirm({ signupToken, ref: referrer.referralCode });
