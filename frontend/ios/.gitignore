@@ -11,3 +11,6 @@ capacitor-cordova-ios-plugins
 # Generated Config files
 App/App/capacitor.config.json
 App/App/config.xml
+
+# Firebase iOS config (per-project keys) - never commit; see docs/ios-release.md
+App/App/GoogleService-Info.plist
