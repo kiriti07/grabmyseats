@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { BrandCredit } from "@/components/ui/BrandCredit";
 import { InviteCodeField } from "@/components/auth/InviteCodeField";
+import { TermsConsentNote } from "@/components/auth/TermsConsentNote";
 import { ApiError, checkReferralCode, requestOtp } from "@/lib/api";
 import { useAuthOptions } from "@/hooks/useAuthOptions";
 import { normalizeIdentifier } from "@/lib/identifier";
@@ -181,6 +182,7 @@ export function IdentifierAuth({ intent }: { intent: "signin" | "signup" }) {
           <Button type="submit" isLoading={isLoading}>
             {isLoading ? "Sending..." : "Send code"}
           </Button>
+          {intent === "signup" && <TermsConsentNote />}
         </div>
       </form>
 

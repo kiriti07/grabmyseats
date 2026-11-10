@@ -1,8 +1,10 @@
 import "dotenv/config";
+import type { Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -20,6 +22,7 @@ import { emailProvider } from "../lib/email";
 import { smsProvider } from "../lib/sms";
 import { checkDevOtpBypassAtStartup } from "../lib/config";
 import { normalizeReferralCode, resolveReferrer } from "../lib/referral";
+import { closeServer, listenLocal } from "../test/server";
 
 // Invite-only sign-up (REQUIRE_REFERRAL_FOR_SIGNUP): with the flag on, a
 // new account can only be created with a valid invite (referral) code, on
@@ -65,7 +68,7 @@ describe("invite-only sign-up", () => {
   }
 
   function verify(body: Record<string, unknown>) {
-    return request(app).post("/api/auth/otp/verify").set("X-Forwarded-For", clientIp).send(body);
+    return request(server).post("/api/auth/otp/verify").set("X-Forwarded-For", clientIp).send(body);
   }
 
   async function verifyWithCode(
@@ -80,24 +83,35 @@ describe("invite-only sign-up", () => {
   }
 
   function confirm(body: Record<string, unknown>) {
-    return request(app)
+    return request(server)
       .post("/api/auth/signup/confirm")
       .set("X-Forwarded-For", clientIp)
       .send(body);
   }
 
   function requestCode(body: Record<string, unknown>) {
-    return request(app).post("/api/auth/otp/request").set("X-Forwarded-For", clientIp).send(body);
+    return request(server).post("/api/auth/otp/request").set("X-Forwarded-For", clientIp).send(body);
   }
 
   async function pendingCodeExists(email: string): Promise<boolean> {
     return (await redis.exists(`otp:${loginOtpIdentifier("email", email)}`)) === 1;
   }
 
+  async function termsAcceptedAtOf(userId: string): Promise<Date | null> {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    return user.termsAcceptedAt;
+  }
+
   async function referrerOf(userId: string): Promise<string | null> {
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
     return user.referredByUserId;
   }
+
+  let server: Server;
+
+  beforeAll(async () => {
+    server = await listenLocal(app);
+  });
 
   let emailSpy: MockInstance<(to: string, subject: string, body: string) => Promise<void>>;
   let smsSpy: MockInstance<(phone: string, message: string) => Promise<void>>;
@@ -120,6 +134,7 @@ describe("invite-only sign-up", () => {
   });
 
   afterAll(async () => {
+    await closeServer(server);
     // referredByUserId is ON DELETE SET NULL - order doesn't matter.
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   });
@@ -188,6 +203,8 @@ describe("invite-only sign-up", () => {
       expect(res.status).toBe(200);
       expect(res.body.data.isNewAccount).toBe(true);
       expect(await referrerOf(res.body.data.user.id)).toBe(referrer.id);
+      // Created from the sign-up screen's consent line.
+      expect(await termsAcceptedAtOf(res.body.data.user.id)).toBeInstanceOf(Date);
     });
 
     it("lowercase, padded and dash-grouped codes match the same referrer", async () => {
@@ -236,7 +253,7 @@ describe("invite-only sign-up", () => {
         expect(res.body.error).toMatch(/isn't valid anymore/);
         expect(await prisma.user.count({ where: { email } })).toBe(0);
 
-        const check = await request(app)
+        const check = await request(server)
           .post("/api/auth/referral/check")
           .set("X-Forwarded-For", clientIp)
           .send({ code: referrer.referralCode });
@@ -255,6 +272,8 @@ describe("invite-only sign-up", () => {
         expect(res.body.data.isNewAccount).toBe(false);
         expect(res.body.data.user.id).toBe(existing.id);
       }
+      // Never asked to accept again, and logging in records nothing.
+      expect(await termsAcceptedAtOf(existing.id)).toBeNull();
     });
 
     it("get a sign-in code without any code", async () => {
@@ -316,6 +335,8 @@ describe("invite-only sign-up", () => {
       userIds.push(ok.body.data.user.id);
       expect(ok.body.data.isNewAccount).toBe(true);
       expect(await referrerOf(ok.body.data.user.id)).toBe(referrer.id);
+      // "No account yet" -> Create an account shows the consent line too.
+      expect(await termsAcceptedAtOf(ok.body.data.user.id)).toBeInstanceOf(Date);
 
       // Spent now.
       const reuse = await confirm({ signupToken, ref: referrer.referralCode });
@@ -388,7 +409,7 @@ describe("invite-only sign-up", () => {
     it("answers valid or not, never whose code it is", async () => {
       const referrer = await createUser();
       const check = (code: unknown) =>
-        request(app).post("/api/auth/referral/check").set("X-Forwarded-For", clientIp).send({ code });
+        request(server).post("/api/auth/referral/check").set("X-Forwarded-For", clientIp).send({ code });
 
       const ok = await check(` ${referrer.referralCode.toLowerCase()} `);
       expect(ok.status).toBe(200);
@@ -401,7 +422,7 @@ describe("invite-only sign-up", () => {
     it("is rate-limited per IP against guessing", async () => {
       const statuses: number[] = [];
       for (let i = 0; i < 21; i++) {
-        const res = await request(app)
+        const res = await request(server)
           .post("/api/auth/referral/check")
           .set("X-Forwarded-For", clientIp)
           .send({ code: `GUESS${i}` });

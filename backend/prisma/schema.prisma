@@ -107,6 +107,13 @@ model User {
   // days); not exposed on the customer-facing User shape, admin-only.
   lastLoginAt DateTime?
 
+  // When this account was created on a screen showing "By creating an
+  // account you agree to the Terms and Privacy Policy" (both sign-up paths -
+  // see createAccountForVerifiedIdentifier in routes/auth.ts). Null for
+  // accounts that predate it and for the Play review account; nobody is
+  // asked to accept again. Admin/audit only, not on the customer User shape.
+  termsAcceptedAt DateTime?
+
   fraudReportsFiled   FraudReport[] @relation("reporter")
   fraudReportsAgainst FraudReport[] @relation("reportedUser")
 
@@ -593,6 +600,13 @@ model PushDelivery {
   @@index([status])
 }
 
+enum FraudReportReason {
+  FRAUD
+  OFFENSIVE
+  HARASSMENT
+  OTHER
+}
+
 enum FraudReportStatus {
   PENDING
   REVIEWED
@@ -615,6 +629,9 @@ model FraudReport {
   // one) - see POST /api/fraud-reports.
   relatedTransactionId String?
   relatedTransaction   Transaction? @relation(fields: [relatedTransactionId], references: [id])
+  // What kind of problem it is - picked in the report form. Existing rows
+  // (all filed from the fraud-only form) default to FRAUD.
+  reason         FraudReportReason @default(FRAUD)
   description    String
   // Uploaded via the same StorageProvider as listing screenshots / the
   // email-forward attachment - see middleware/upload.ts's

@@ -168,6 +168,11 @@ async function createAccountForVerifiedIdentifier(
             : { phone: input.value, phoneVerifiedAt: now }),
           referralCode,
           referredByUserId,
+          // Both callers (/otp/verify with intent "signup", /signup/confirm)
+          // come from a screen showing the Terms/Privacy consent line
+          // (frontend IdentifierAuth). The review account is created in
+          // lib/reviewAccess.ts instead and never gets this.
+          termsAcceptedAt: now,
         },
       });
       return { user, isNewAccount: true };

@@ -9,6 +9,7 @@ import { OtpInput } from "@/components/auth/OtpInput";
 import { Button } from "@/components/ui/Button";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { InviteCodeField } from "@/components/auth/InviteCodeField";
+import { TermsConsentNote } from "@/components/auth/TermsConsentNote";
 import { useAuth } from "@/context/AuthContext";
 import { useAuthOptions } from "@/hooks/useAuthOptions";
 import { ApiError, confirmSignup, requestOtp, verifyOtpCode } from "@/lib/api";
@@ -177,6 +178,7 @@ function VerifyForm() {
           <Button onClick={handleCreateAccount} isLoading={isCreating}>
             {isCreating ? "Creating..." : "Create an account"}
           </Button>
+          <TermsConsentNote />
         </div>
         <p className="mt-5 text-center text-sm text-muted">
           <Link href={backHref} className="font-medium text-gold hover:text-gold-dim">

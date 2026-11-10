@@ -129,6 +129,8 @@ describe("Play reviewer login (REVIEW_EMAIL / REVIEW_OTP)", () => {
       expect(stored.isReviewAccount).toBe(true);
       expect(stored.emailVerifiedAt).toBeNull();
       expect(stored.phoneVerifiedAt).toBeNull();
+      // The review login is not a sign-up screen - no terms acceptance.
+      expect(stored.termsAcceptedAt).toBeNull();
 
       // Same account again next time, not a new one.
       const again = await verify({ channel: "email", identifier: REVIEW_EMAIL, code: REVIEW_OTP });
