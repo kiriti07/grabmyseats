@@ -1,4 +1,5 @@
 import "dotenv/config";
+import type { Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import request from "supertest";
@@ -7,6 +8,7 @@ import { prisma } from "../lib/prisma";
 import { issueSessionToken } from "../lib/session";
 import { ticketImage } from "../test/ticketImage";
 import { learnVenuePin } from "../lib/geo/venueLearning";
+import { closeServer, listenLocal } from "../test/server";
 
 // Venue lookup (POST /api/listings/geocode -> lib/geo/venueLookup.ts) and
 // learning from confirmed pins (POST /api/listings -> lib/geo/
@@ -19,6 +21,7 @@ describe("venue lookup and learning", () => {
   const userIds: string[] = [];
   const listingIds: string[] = [];
   let sellerToken: string;
+  let server: Server;
 
   // Points inside Hyderabad's bounds.
   const KOKAPET = { lat: 17.3916, lng: 78.3226 };
@@ -43,7 +46,7 @@ describe("venue lookup and learning", () => {
   }
 
   function lookup(theaterName: string, city = "Hyderabad", token = sellerToken) {
-    return request(app)
+    return request(server)
       .post("/api/listings/geocode")
       .set("Authorization", `Bearer ${token}`)
       .send({ theaterName, city });
@@ -63,6 +66,7 @@ describe("venue lookup and learning", () => {
   }
 
   beforeAll(async () => {
+    server = await listenLocal(app);
     ({ token: sellerToken } = await createUser());
   });
 
@@ -84,6 +88,7 @@ describe("venue lookup and learning", () => {
   });
 
   afterAll(async () => {
+    await closeServer(server);
     await prisma.venue.deleteMany({ where: { normalizedName: { contains: TAG } } });
     await prisma.listing.deleteMany({ where: { id: { in: listingIds } } });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
@@ -335,7 +340,7 @@ describe("venue lookup and learning", () => {
   describe("POST /api/listings feeds learning", () => {
 
     async function createListing(theaterName: string, pin: { lat: number; lng: number } | null) {
-      const req = request(app)
+      const req = request(server)
         .post("/api/listings")
         .set("Authorization", `Bearer ${sellerToken}`)
         .field("movieName", "Venue Learning Movie")
